@@ -10,11 +10,13 @@
 Two destinations. Every sender routes to exactly one.
 
 **Professional chain (categorized / processed)**
+
 - Email: `shawn.becker@spexture.com`
 - Phone & text: `(385) 403-3248` (hosted in Nextiva)
 - Nextiva handles transcription, classification, routing, summaries for these channels.
 
 **Personal hub (walled off — never touches Nextiva)**
+
 - One consolidated inbox fed by the old personal addresses:
   - `sbecker@alum.mit.edu`
   - `shawn.becker@yahoo.com`
@@ -23,44 +25,52 @@ Two destinations. Every sender routes to exactly one.
 
 ---
 
-## Phase 0 — Lock the two open decisions
+## Phase 0 — Lock architecture decisions
 
-- [ ] **Old phone number:** port it into Nextiva (preserves continuity, no lost texts) **or** clean cutover (rely on the announcement). *Decision: __________*
-- [ ] **Personal hub address:** which inbox is canonical? Gmail recommended for its fetch + send-as + filter capabilities. *Decision: __________*
-- [ ] **Destination rule defined:** business-relevant senders → professional; personal senders → personal hub. Sort up front so you're not deciding ad hoc per vendor.
+- [x] **Old phone number:** port into Nextiva (preserves continuity, no lost texts). *Decision: port old number to Nextiva — invisible to callers; existing dialers keep working.*
+- [x] **Personal hub:** `scbboston@gmail.com`. *Decision: canonical personal inbox.*
+- [x] **Professional hub:** `shawn.becker@spexture.com` + `(385) 403-3248` (Nextiva). *Decision: canonical business email and phone.*
+- [ ] **Destination rule defined:** business-relevant senders → professional hub; personal senders → personal hub. Sort up front so you're not deciding ad hoc per vendor.
+
+**Phone port vs. announcement:** Nextiva hosts both numbers during transition. The **old number** is ported in so callers see no interruption. **`(385) 403-3248`** is the canonical *professional* number announced in Phase 3 — steer new and business contacts there over time; the ported old number remains a safety net until traffic dies down.
+
+**Classifier contract:** input → output field mapping is in Appendix B.
 
 ---
 
 ## Phase 1 — Stand up the professional telephony chain (Nextiva)
 
-- [ ] Port `(385) 403-3248` into Nextiva so it *hosts* the number (required for texts — SMS cannot be forwarded).
+- [ ] Port **old phone number** into Nextiva (Phase 0 decision — continuity for existing callers).
+- [ ] Port `(385) 403-3248` into Nextiva so it _hosts_ the number (required for texts — SMS cannot be forwarded).
 - [ ] Start **10DLC / A2P texting registration immediately** — it has lead time and SMS won't work until it clears.
 - [ ] Enable **voicemail-to-email + transcription** (transcription requires voicemail stored on Nextiva's system).
-- [ ] Connect `shawn.becker@spexture.com` as an email channel in Nextiva — *or* plan the custom aggregator (Gmail/Workspace API) if you want full control.
+- [ ] Connect `shawn.becker@spexture.com` as an email channel in Nextiva — _or_ plan the custom aggregator (Gmail/Workspace API) if you want full control.
 - [ ] Verify: test call, test text, and a voicemail all land and process correctly.
 
 ---
 
 ## Phase 2 — Stand up the personal hub
 
-- [ ] Confirm the hub inbox (Phase 0 decision).
-- [ ] **MIT alum** (`sbecker@alum.mit.edu`): it's a forwarding alias — point its destination at the hub.
-- [ ] **Yahoo** (`shawn.becker@yahoo.com`): already on **Yahoo Mail+** (paid) — auto-forwarding is available. Point Yahoo's forward destination at the hub. *(POP-fetch via Gmail's "Check mail from other accounts" is only needed if you drop Mail+.)*
-- [ ] **Old Gmail** (`scbboston@gmail.com`): forward/fetch into the hub, or make it the hub itself.
+- [x] Confirm the hub inbox: `scbboston@gmail.com` (Phase 0 decision).
+- [ ] **MIT alum** (`sbecker@alum.mit.edu`): it's a forwarding alias — point its destination at `scbboston@gmail.com`.
+- [ ] **Yahoo** (`shawn.becker@yahoo.com`): already on **Yahoo Mail+** (paid) — auto-forwarding is available. Point Yahoo's forward destination at `scbboston@gmail.com`. _(POP-fetch via Gmail's "Check mail from other accounts" is only needed if you drop Mail+.)_
+- [ ] **Hub Gmail** (`scbboston@gmail.com`): this _is_ the hub — no self-forward needed. Configure send-as for MIT alum and Yahoo aliases below.
 - [ ] Configure **"Send mail as"** for each alias so replies go out from the address the sender used.
 - [ ] Configure **labels by to-address** (provenance + doubles as migration tracking).
 - [ ] **Secure the hub:** strong unique password + 2FA — it now aggregates three identities, so it's a single point of compromise.
-- [ ] Verify: send a test to each old address and confirm it lands in the hub and you can reply *as* that address.
+- [ ] Verify: send a test to each old address and confirm it lands in the hub and you can reply _as_ that address.
 
 ---
 
 ## Phase 3 — Announce (only after Phase 1 is verified working)
 
-> Sequencing matters: announce **after** the port + 10DLC registration complete, or early texters hit a dead number.
+> Sequencing matters: announce **after** both number ports + 10DLC registration complete, or early texters hit a dead number.
 
-- [ ] Email blast to contacts (professional variant — see Appendix A).
-- [ ] One-time text from the new number so it lands in people's threads with caller ID.
+- [ ] Email blast to **professional** contacts (variant — see Appendix A). Announces `(385) 403-3248` as the new business number; email unchanged at `shawn.becker@spexture.com`.
+- [ ] One-time text from `(385) 403-3248` so it lands in people's threads with caller ID.
 - [ ] LinkedIn note for professional contacts without your email.
+
+> **Note:** The ported old number keeps working silently — no announcement needed for personal contacts still using it. Phase 4 migration gradually moves senders to the correct permanent surface.
 
 Three drafted variants (professional / casual / short text) are available in the chat thread.
 
@@ -71,6 +81,7 @@ Three drafted variants (professional / casual / short text) are available in the
 **The hub is your safety net and your worklist.** Every message still arriving at an old address = a sender not yet migrated. When a sender goes quiet on the old address, it's done. Use `pending` / `migrated` labels to track.
 
 **Safe-swap procedure per account:**
+
 1. Add and verify the new contact info (email and/or phone).
 2. Confirm receipt at the new destination.
 3. Confirm 2FA / recovery still works.
@@ -79,6 +90,7 @@ Three drafted variants (professional / casual / short text) are available in the
 **Sequencing:** low-stakes marketing & e-commerce first (build the routine) → financial, identity, and 2FA-bound accounts last (move deliberately).
 
 **Cautions:**
+
 - **VoIP 2FA rejection:** the Nextiva number is VoIP; many banks and security-sensitive services reject VoIP numbers for SMS OTP. Keep a real mobile line for those. Test on a low-stakes account first.
 - **Never orphan a recovery path** mid-switch.
 - **Some senders never honor changes** (marketing lists). That's fine — the hub keeps catching them; filter or ignore.
@@ -92,11 +104,12 @@ Three drafted variants (professional / casual / short text) are available in the
 **Native Nextiva** gives you sentiment, classification, routing, and post-interaction summaries for its channels out of the box.
 
 **Custom classifier** (your build) for full control and a single pane:
+
 - Normalize every channel to one schema (Appendix B).
 - Categorize by **source + subject + content**.
 - Action tiers: **Notify now** → **Digest** → **Draft for approval** → **Auto-handle**.
 - Keep **human-in-the-loop** on client/recruiter-facing actions; promote categories to full automation only after watching them behave.
-- The same classifier can point at the personal hub if you ever want uniform processing under *your* control rather than the vendor's.
+- The same classifier can point at the personal hub if you ever want uniform processing under _your_ control rather than the vendor's.
 
 ---
 
@@ -120,7 +133,9 @@ Three drafted variants (professional / casual / short text) are available in the
 
 ---
 
-## Appendix B — Normalized message schema
+## Appendix B — Normalized message schema & classifier contract
+
+**Canonical record** (all channels normalize to this):
 
 ```
 {
@@ -138,13 +153,36 @@ Three drafted variants (professional / casual / short text) are available in the
 }
 ```
 
+**Input properties** (extracted from raw message):
+
+| Field | Source |
+|---|---|
+| `comm_source` | Channel the message arrived on |
+| `from_address` | Email: sender address; phone call: caller ID; SMS: from-number |
+| `sender_first_name` | Parsed or looked up |
+| `sender_last_name` | Parsed or looked up |
+| `sender_company` | Parsed or looked up |
+| `sender_email` | Sender identity (may differ from `from_address` on forwarded mail) |
+| `sender_phone` | Sender identity phone |
+| `message_summary` | Subject line, transcript excerpt, or generated summary |
+
+**Output properties** (classifier assigns):
+
+| Field | Values / notes |
+|---|---|
+| `category` | `professional` \| `personal` |
+| `subcategory` | e.g. `recruiter_initial_call`, `recruiter_follow_up`, `active_client`, `financial`, `vendor`, `spam` |
+| `target_hub` | `professional` (`shawn.becker@spexture.com` / Nextiva) \| `personal` (`scbboston@gmail.com`) |
+| `urgency` | `low` \| `normal` \| `high` |
+| `suggested_action` | See Appendix C |
+
 ## Appendix C — Category → signal → action
 
-| Category | Trigger signals | Default action |
-|---|---|---|
-| Active client | Known client domain/number | Notify now; draft reply (hold for approval) |
-| Recruiter / job | Recruiter language, JD content, scheduling | Tag → match-triage; draft acknowledgment for review |
-| Personal | Known personal contact | Route to personal hub |
-| Financial / admin | Banks, invoices, account notices | Flag; no auto-action |
-| Vendor / transactional | Receipts, confirmations, newsletters | Daily digest |
-| Spam / unknown | Unrecognized sender | Quarantine |
+| Category               | Trigger signals                            | Default action                                      |
+| ---------------------- | ------------------------------------------ | --------------------------------------------------- |
+| Active client          | Known client domain/number                 | Notify now; draft reply (hold for approval)         |
+| Recruiter / job        | Recruiter language, JD content, scheduling | Tag → match-triage; draft acknowledgment for review |
+| Personal               | Known personal contact                     | Route to personal hub                               |
+| Financial / admin      | Banks, invoices, account notices           | Flag; no auto-action                                |
+| Vendor / transactional | Receipts, confirmations, newsletters       | Daily digest                                        |
+| Spam / unknown         | Unrecognized sender                        | Quarantine                                          |
