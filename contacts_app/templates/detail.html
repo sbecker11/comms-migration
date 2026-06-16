@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}{% if is_new %}New Contact{% else %}{{ contact | display_name }}{% endif %} — Contacts{% endblock %}
+{% block content %}
+<section class="panel">
+  <p class="breadcrumb">
+    <a href="/{% if return_query %}?{{ return_query }}{% endif %}">← Back to list</a>
+  </p>
+  <h1>{% if is_new %}New Contact{% else %}{{ contact | display_name }}{% endif %}</h1>
+  {% if not is_new %}<p class="subtitle mono">{{ contact.id }}</p>{% endif %}
+</section>
+
+<form method="post" action="{% if is_new %}/contacts/new{% else %}/contacts/{{ contact.id }}{% endif %}" class="detail-form panel">
+  <input type="hidden" name="return_query" value="{{ return_query }}">
+
+  <fieldset>
+    <legend>Name &amp; organization</legend>
+    <div class="grid-2">
+      <label>First name
+        <input type="text" name="first_name" value="{{ contact.first_name }}">
+      </label>
+      <label>Last name
+        <input type="text" name="last_name" value="{{ contact.last_name }}">
+      </label>
+    </div>
+    <label>Organization
+      <input type="text" name="organization" value="{{ contact.organization }}">
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Email addresses</legend>
+    <div class="repeatable" data-repeatable="email">
+      {% for email in contact.emails %}
+      <div class="repeat-row">
+        <input type="text" name="email_label" value="{{ email.label }}" placeholder="Label">
+        <input type="email" name="email_value" value="{{ email.value }}" placeholder="email@example.com">
+        <button type="button" class="btn-ghost remove-row">Remove</button>
+      </div>
+      {% endfor %}
+      {% if not contact.emails %}
+      <div class="repeat-row">
+        <input type="text" name="email_label" placeholder="Label">
+        <input type="email" name="email_value" placeholder="email@example.com">
+        <button type="button" class="btn-ghost remove-row">Remove</button>
+      </div>
+      {% endif %}
+    </div>
+    <button type="button" class="btn-secondary add-row" data-target="email">+ Add email</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Phone numbers</legend>
+    <div class="repeatable" data-repeatable="phone">
+      {% for phone in contact.phones %}
+      <div class="repeat-row">
+        <input type="text" name="phone_label" value="{{ phone.label }}" placeholder="Label">
+        <input type="tel" name="phone_value" value="{{ phone.value }}" placeholder="+1…">
+        <button type="button" class="btn-ghost remove-row">Remove</button>
+      </div>
+      {% endfor %}
+      {% if not contact.phones %}
+      <div class="repeat-row">
+        <input type="text" name="phone_label" placeholder="Label">
+        <input type="tel" name="phone_value" placeholder="+1…">
+        <button type="button" class="btn-ghost remove-row">Remove</button>
+      </div>
+      {% endif %}
+    </div>
+    <button type="button" class="btn-secondary add-row" data-target="phone">+ Add phone</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Web &amp; LinkedIn</legend>
+    <label>LinkedIn
+      <input type="url" name="linkedin" value="{{ linkedin_value }}" placeholder="{{ linkedin_value }}">
+    </label>
+    <div class="repeatable" data-repeatable="url">
+      {% for url in contact.urls %}
+      {% if 'linkedin.com' not in (url.value or '')|lower %}
+      <div class="repeat-row">
+        <input type="text" name="url_label" value="{{ url.label }}" placeholder="Label">
+        <input type="url" name="url_value" value="{{ url.value }}" placeholder="https://…">
+        <button type="button" class="btn-ghost remove-row">Remove</button>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    <button type="button" class="btn-secondary add-row" data-target="url">+ Add website</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Notes</legend>
+    <textarea name="notes" rows="4">{{ contact.notes }}</textarea>
+  </fieldset>
+
+  <fieldset>
+    <legend>Contact groups</legend>
+    <div class="checkbox-grid">
+      {% for g in groups %}
+      <label class="checkbox-card {% if g == 'Is Deleted' %}checkbox-danger{% endif %}">
+        <input type="checkbox" name="groups" value="{{ g }}"
+          {% if g in (contact.groups or []) %}checked{% endif %}>
+        {{ g }}
+      </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <div class="form-actions">
+    <a class="btn-secondary" href="/{% if return_query %}?{{ return_query }}{% endif %}">Cancel</a>
+    <button type="submit" class="btn-primary">Save</button>
+  </div>
+</form>
+{% endblock %}

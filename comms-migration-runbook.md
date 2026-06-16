@@ -30,7 +30,7 @@ Two destinations. Every sender routes to exactly one.
 - [x] **Old phone number:** port into Nextiva (preserves continuity, no lost texts). *Decision: port old number to Nextiva — invisible to callers; existing dialers keep working.*
 - [x] **Personal hub:** `scbboston@gmail.com`. *Decision: canonical personal inbox.*
 - [x] **Professional hub:** `shawn.becker@spexture.com` + `(385) 403-3248` (Nextiva). *Decision: canonical business email and phone.*
-- [ ] **Destination rule defined:** business-relevant senders → professional hub; personal senders → personal hub. Sort up front so you're not deciding ad hoc per vendor. *(Starter template below; machine-readable copy in `rules/senders.yaml`.)*
+- [ ] **Destination rule defined:** business-relevant senders → professional hub; personal senders → personal hub. Sort up front so you're not deciding ad hoc per vendor. *(Use `contacts/Contacts.yaml` + web editor — see `contacts/README.md`; export to `rules/senders.yaml` when ready.)*
 
 **Phone port vs. announcement:** Nextiva hosts both numbers during transition. The **old number** is ported in so callers see no interruption. **`(385) 403-3248`** is the canonical *professional* number announced in Phase 3 — steer new and business contacts there over time; the ported old number remains a safety net until traffic dies down.
 
@@ -39,10 +39,12 @@ Two destinations. Every sender routes to exactly one.
 | Layer | Question it answers | Implementation | Phase |
 |---|---|---|---|
 | **Ingress / provenance** | Which old address did they use? | Gmail filters (label by `To:`) | 2 |
-| **Destination rule** | Which hub does this *sender* belong on? | `rules/senders.yaml` + spreadsheet | 0, 4 |
+| **Destination rule** | Which hub does this *sender* belong on? | `contacts/Contacts.yaml` → `rules/senders.yaml` | 0, 4 |
 | **Classifier / actions** | What kind of message; what to do? | Nextiva native and/or Python (Appendix D) | 5 |
 
-**Destination rule — starter sender table** (fill in; duplicate to `rules/senders.yaml` when ready):
+**Contact groups (recommended):** Import macOS Contacts, assign each person to `Professional` or `Personal` via the local web app (`contacts/README.md`). Use `Is Deleted` to hide obsolete entries.
+
+**Destination rule — starter sender table** (domains / edge cases; add to `rules/senders.yaml`):
 
 | Sender (domain, email, or phone) | Hub | Notes |
 |---|---|---|

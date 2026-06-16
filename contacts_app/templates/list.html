@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Contacts — list{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="list-header">
+    <div>
+      <h1>Contacts</h1>
+      <p class="subtitle">{{ total }} contact{{ "s" if total != 1 else "" }} · file: contacts/Contacts.yaml</p>
+    </div>
+    <a href="/contacts/new" class="btn-primary">Add New Contact</a>
+  </div>
+
+  <form method="get" class="filters">
+    <label>
+      Search
+      <input type="search" name="q" value="{{ q }}" placeholder="Name, email, org, phone…">
+    </label>
+    <label>
+      Group
+      <select name="group">
+        <option value="">All groups</option>
+        {% for g in meta.groups %}
+        <option value="{{ g }}" {% if g == group %}selected{% endif %}>{{ g }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Per page
+      <select name="per_page">
+        {% for n in [25, 50, 100] %}
+        <option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="checkbox-inline">
+      <input type="checkbox" name="include_deleted" value="true" {% if include_deleted %}checked{% endif %}>
+      Show deleted
+    </label>
+    <button type="submit">Apply</button>
+  </form>
+</section>
+
+{% if contacts %}
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Organization</th>
+      <th>Email</th>
+      <th>Groups</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for contact in contacts %}
+    <tr class="{% if contact.groups and ('Is Deleted' in contact.groups or 'is deleted' in contact.groups) %}row-deleted{% endif %}">
+      <td>
+        <a href="/contacts/{{ contact.id }}?{{ request.url.query }}">{{ contact | display_name }}</a>
+      </td>
+      <td>{{ contact.organization or "—" }}</td>
+      <td>
+        {% if contact.emails %}
+          {{ contact.emails[0].value }}
+        {% else %}
+          —
+        {% endif %}
+      </td>
+      <td class="tags">
+        {% for g in contact.groups or [] %}
+        <span class="tag">{{ g }}</span>
+        {% else %}
+        —
+        {% endfor %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<nav class="pagination">
+  {% if page > 1 %}
+  <a href="{{ list_url(q=q, group=group, per_page=per_page, page=page-1, include_deleted='true' if include_deleted else '') }}">← Prev</a>
+  {% endif %}
+  <span>Page {{ page }} of {{ total_pages }}</span>
+  {% if page < total_pages %}
+  <a href="{{ list_url(q=q, group=group, per_page=per_page, page=page+1, include_deleted='true' if include_deleted else '') }}">Next →</a>
+  {% endif %}
+</nav>
+{% else %}
+<p class="empty">No contacts match your filters. Run <code>python scripts/init_contacts.py</code> to import from macOS Contacts.</p>
+{% endif %}
+{% endblock %}

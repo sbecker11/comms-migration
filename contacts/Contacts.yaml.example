@@ -1,0 +1,24 @@
+meta:
+  version: 1
+  updated_at: "2026-01-01T00:00:00+00:00"
+  groups:
+    - Professional
+    - Personal
+    - Is Deleted
+contacts:
+  - id: example-0001
+    first_name: Jane
+    last_name: Example
+    organization: Spexture
+    emails:
+      - label: Work
+        value: jane.example@spexture.com
+    phones:
+      - label: Mobile
+        value: "+1 555 0100"
+    urls: []
+    linkedin: ""
+    groups:
+      - Professional
+    notes: Sample contact — replace by running scripts/init_contacts.py
+    source: example
