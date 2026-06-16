@@ -1,0 +1,61 @@
+# Classifier actions (Layer 3) — mirrors Appendix C
+# Executed by Nextiva workflows (professional channels) or Python classifier (Phase 5)
+
+categories:
+  active_client:
+    trigger_signals:
+      - known client domain or number
+    default_action: notify_now
+    sub_actions:
+      - draft_reply
+    human_in_loop: true
+
+  recruiter_job:
+    trigger_signals:
+      - recruiter language
+      - job description content
+      - scheduling language
+    default_action: tag
+    sub_actions:
+      - match_triage
+      - draft_acknowledgment_for_review
+    human_in_loop: true
+    subcategories:
+      - recruiter_initial_call
+      - recruiter_follow_up
+
+  personal:
+    trigger_signals:
+      - known personal contact
+    default_action: route
+    target_hub: personal
+    human_in_loop: false
+
+  financial_admin:
+    trigger_signals:
+      - banks
+      - invoices
+      - account notices
+    default_action: flag
+    human_in_loop: true
+
+  vendor_transactional:
+    trigger_signals:
+      - receipts
+      - confirmations
+      - newsletters
+    default_action: daily_digest
+    human_in_loop: false
+
+  spam_unknown:
+    trigger_signals:
+      - unrecognized sender
+    default_action: quarantine
+    human_in_loop: false
+
+# Action tier precedence (Phase 5 automation promotion path)
+action_tiers:
+  - notify_now
+  - digest
+  - draft_for_approval
+  - auto_handle
