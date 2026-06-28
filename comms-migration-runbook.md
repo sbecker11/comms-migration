@@ -23,6 +23,8 @@ Two destinations. Every sender routes to exactly one.
   - `scbboston@gmail.com`
 - Friends and family keep using whatever old address they know — they change nothing.
 
+**Routing inventory:** Forwards, categorization routes (politics, church, investing, insurance, billing), the recruiting funnel, and sensitive-category migration order are documented in [`routing-inventory.md`](routing-inventory.md). Processing logic for the recruiting funnel lives in the [job-tracker](https://github.com/sbecker11/job-tracker) repo, not here.
+
 ---
 
 ## Phase 0 — Lock architecture decisions
