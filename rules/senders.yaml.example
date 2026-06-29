@@ -1,0 +1,54 @@
+# rules/senders.yaml.example
+#
+# SCHEMA STUB — safe to commit. Contains only synthetic example data.
+#
+# The REAL file, rules/senders.yaml, is GENERATED from contacts/Contacts.yaml
+# and is GITIGNORED because it contains personal data (names, emails, phones)
+# for hundreds of real contacts. Do not commit the generated file.
+#
+# Regenerate the real file with:
+#   python scripts/export_senders_cli.py
+#
+# Destination rule (Layer 2) — which hub does an incoming sender belong on?
+# The classifier loads this to route mail to the Professional or Personal hub.
+#
+# Match order (first hit wins):
+#   1. exact email      (emails:)
+#   2. exact phone       (phones:, E.164)
+#   3. domain            (domains:, longest match wins)
+#   4. overrides         (explicit per-sender pin, beats the above)
+#   5. default           (fallback hub)
+
+professional:
+  domains:
+    - examplecorp.com
+    - client-placeholder.com
+  emails:
+    - person.one@examplecorp.com
+    - contact@client-placeholder.com
+  phones:
+    - '+15550000001'
+    - '+15550000002'
+
+personal:
+  domains:
+    - example.net
+    - mail-placeholder.org
+  emails:
+    - someone@example.net
+    - friend@mail-placeholder.org
+  phones:
+    - '+15550000100'
+    - '+15550000101'
+
+# Explicit per-sender pins. An override beats domain/email/phone matching above.
+# Use for the exceptions: a personal contact at a professional domain, etc.
+# Each entry: { match: <email|phone|domain>, hub: <professional|personal> }
+overrides:
+  - match: person.one@example.net      # personal-domain address, treated as work
+    hub: professional
+  - match: '+15550000999'
+    hub: personal
+
+# Fallback when nothing above matches.
+default: personal
