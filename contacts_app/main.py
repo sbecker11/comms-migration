@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -18,12 +18,16 @@ from contacts.store import (
     apply_contact_form,
     filter_contacts,
     find_contact,
+    find_duplicate_contacts,
     linkedin_display_value,
     load,
     new_contact_record,
     normalize_contact,
     paginate,
-    save,
+    primary_phone,
+    sync_is_deleted_for_duplicates,
+    update_standard_groups,
+    update_store,
 )
 
 APP_DIR = Path(__file__).resolve().parent
@@ -47,11 +51,23 @@ def _display_name(contact: dict[str, Any]) -> str:
 
 
 templates.env.filters["display_name"] = _display_name
+templates.env.filters["primary_phone"] = primary_phone
 
 
 def _list_url(**params: Any) -> str:
     clean = {k: v for k, v in params.items() if v not in (None, "")}
     return "/?" + urlencode(clean) if clean else "/"
+
+
+def _contact_dom_id(contact_id: str) -> str:
+    return f"contact-{contact_id.replace(':', '_')}"
+
+
+def _list_return_url(return_query: str, contact_id: str = "") -> str:
+    base = f"/?{return_query}" if return_query else "/"
+    if contact_id:
+        return f"{base}#{_contact_dom_id(contact_id)}"
+    return base
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -87,6 +103,7 @@ def list_contacts(
             "total_pages": total_pages,
             "include_deleted": include_deleted,
             "list_url": _list_url,
+            "return_query": request.url.query,
         },
     )
 
@@ -94,16 +111,22 @@ def list_contacts(
 def _detail_context(
     contact: dict[str, Any],
     meta: dict[str, Any],
+    data: dict[str, Any],
     *,
     is_new: bool = False,
     return_query: str = "",
 ) -> dict[str, Any]:
+    contact_id = contact.get("id", "")
+    dup_count = 0 if is_new else len(find_duplicate_contacts(data, contact))
     return {
         "contact": contact,
         "meta": meta,
         "groups": STANDARD_GROUPS,
         "linkedin_value": linkedin_display_value(contact.get("linkedin") or ""),
         "return_query": return_query,
+        "list_return_url": _list_return_url(return_query, "" if is_new else contact_id),
+        "contact_dom_id": _contact_dom_id(contact_id) if contact_id else "",
+        "dup_count": dup_count,
         "is_new": is_new,
     }
 
@@ -115,7 +138,7 @@ def new_contact_form(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "detail.html",
-        _detail_context(contact, data["meta"], is_new=True),
+        _detail_context(contact, data["meta"], data, is_new=True),
     )
 
 
@@ -140,6 +163,7 @@ def contact_detail(
         _detail_context(
             contact,
             data["meta"],
+            data,
             return_query=urlencode(
                 {
                     k: v
@@ -221,11 +245,10 @@ def create_contact(
     groups: list[str] = Form(default=[]),
     return_query: str = Form(""),
 ) -> RedirectResponse:
-    data = load()
-    contact = new_contact_record()
+    new_contact = new_contact_record()
     contact_id = _save_contact_from_form(
-        data,
-        contact,
+        {},
+        new_contact,
         first_name=first_name,
         last_name=last_name,
         organization=organization,
@@ -239,14 +262,44 @@ def create_contact(
         url_value=url_value,
         groups=groups,
     )
-    data["contacts"].append(contact)
-    save(data)
+
+    def mutate(data: dict[str, Any]) -> None:
+        data["contacts"].append(new_contact)
+
+    update_store(mutate)
     suffix = f"?{return_query}" if return_query else ""
     return RedirectResponse(url=f"/contacts/{contact_id}{suffix}", status_code=303)
 
 
-@app.post("/contacts/{contact_id}")
+@app.post("/contacts/{contact_id}/groups", response_model=None)
+def save_contact_groups(
+    request: Request,
+    contact_id: str,
+    groups: list[str] = Form(default=[]),
+    return_query: str = Form(""),
+) -> Response:
+    def mutate(data: dict[str, Any]) -> None:
+        contact = find_contact(data, contact_id)
+        if contact is None:
+            raise LookupError(contact_id)
+        mark_deleted = "Is Deleted" in groups
+        update_standard_groups(contact, groups)
+        sync_is_deleted_for_duplicates(data, contact, mark_deleted)
+
+    try:
+        update_store(mutate)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Contact not found") from None
+
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True})
+    suffix = f"?{return_query}" if return_query else ""
+    return RedirectResponse(url=f"/{suffix}", status_code=303)
+
+
+@app.post("/contacts/{contact_id}", response_model=None)
 def save_contact(
+    request: Request,
     contact_id: str,
     first_name: str = Form(""),
     last_name: str = Form(""),
@@ -261,28 +314,34 @@ def save_contact(
     url_value: list[str] = Form(default=[]),
     groups: list[str] = Form(default=[]),
     return_query: str = Form(""),
-) -> RedirectResponse:
-    data = load()
-    contact = find_contact(data, contact_id)
-    if contact is None:
-        raise HTTPException(status_code=404, detail="Contact not found")
+) -> Response:
+    form_payload = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "organization": organization,
+        "linkedin": linkedin,
+        "notes": notes,
+        "email_label": email_label,
+        "email_value": email_value,
+        "phone_label": phone_label,
+        "phone_value": phone_value,
+        "url_label": url_label,
+        "url_value": url_value,
+        "groups": groups,
+    }
 
-    contact_id = _save_contact_from_form(
-        data,
-        contact,
-        first_name=first_name,
-        last_name=last_name,
-        organization=organization,
-        linkedin=linkedin,
-        notes=notes,
-        email_label=email_label,
-        email_value=email_value,
-        phone_label=phone_label,
-        phone_value=phone_value,
-        url_label=url_label,
-        url_value=url_value,
-        groups=groups,
-    )
-    save(data)
+    def mutate(data: dict[str, Any]) -> None:
+        contact = find_contact(data, contact_id)
+        if contact is None:
+            raise LookupError(contact_id)
+        _save_contact_from_form(data, contact, **form_payload)
+
+    try:
+        update_store(mutate)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Contact not found") from None
+
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, "id": contact_id})
     suffix = f"?{return_query}" if return_query else ""
     return RedirectResponse(url=f"/contacts/{contact_id}{suffix}", status_code=303)

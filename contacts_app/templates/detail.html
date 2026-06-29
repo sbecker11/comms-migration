@@ -3,23 +3,44 @@
 {% block content %}
 <section class="panel">
   <p class="breadcrumb">
-    <a href="/{% if return_query %}?{{ return_query }}{% endif %}">← Back to list</a>
+    <a class="detail-nav-link" href="{{ list_return_url }}">← Back to list</a>
   </p>
   <h1>{% if is_new %}New Contact{% else %}{{ contact | display_name }}{% endif %}</h1>
+  {% if not is_new and dup_count > 1 %}
+  <p class="subtitle">This business matches {{ dup_count }} cards in macOS Contacts (same org and phone). Deleting from the list applies to all of them.</p>
+  {% endif %}
   {% if not is_new %}<p class="subtitle mono">{{ contact.id }}</p>{% endif %}
 </section>
 
-<form method="post" action="{% if is_new %}/contacts/new{% else %}/contacts/{{ contact.id }}{% endif %}" class="detail-form panel">
+<form method="post" action="{% if is_new %}/contacts/new{% else %}/contacts/{{ contact.id }}{% endif %}" class="detail-form panel"{% if not is_new %} data-autosave="true" data-contact-dom-id="{{ contact_dom_id }}"{% endif %}>
   <input type="hidden" name="return_query" value="{{ return_query }}">
+  {% if not is_new %}
+  <p class="save-status" id="save-status" aria-live="polite"></p>
+  {% endif %}
 
   <fieldset>
     <legend>Name &amp; organization</legend>
-    <div class="grid-2">
+    <div class="name-row">
       <label>First name
         <input type="text" name="first_name" value="{{ contact.first_name }}">
       </label>
       <label>Last name
         <input type="text" name="last_name" value="{{ contact.last_name }}">
+      </label>
+      <label class="name-row-check">
+        Pro
+        <input type="checkbox" name="groups" value="Professional"
+          {% if 'Professional' in (contact.groups or []) %}checked{% endif %}>
+      </label>
+      <label class="name-row-check">
+        Pers
+        <input type="checkbox" name="groups" value="Personal"
+          {% if 'Personal' in (contact.groups or []) %}checked{% endif %}>
+      </label>
+      <label class="name-row-check name-row-check-danger">
+        Del
+        <input type="checkbox" name="groups" value="Is Deleted"
+          {% if 'Is Deleted' in (contact.groups or []) or 'is deleted' in (contact.groups or []) %}checked{% endif %}>
       </label>
     </div>
     <label>Organization
@@ -93,22 +114,13 @@
     <textarea name="notes" rows="4">{{ contact.notes }}</textarea>
   </fieldset>
 
-  <fieldset>
-    <legend>Contact groups</legend>
-    <div class="checkbox-grid">
-      {% for g in groups %}
-      <label class="checkbox-card {% if g == 'Is Deleted' %}checkbox-danger{% endif %}">
-        <input type="checkbox" name="groups" value="{{ g }}"
-          {% if g in (contact.groups or []) %}checked{% endif %}>
-        {{ g }}
-      </label>
-      {% endfor %}
-    </div>
-  </fieldset>
-
   <div class="form-actions">
-    <a class="btn-secondary" href="/{% if return_query %}?{{ return_query }}{% endif %}">Cancel</a>
+    <a class="btn-secondary detail-nav-link" href="{{ list_return_url }}">Cancel</a>
+    {% if is_new %}
     <button type="submit" class="btn-primary">Save</button>
+    {% else %}
+    <span class="save-hint">Edits save automatically</span>
+    {% endif %}
   </div>
 </form>
 {% endblock %}

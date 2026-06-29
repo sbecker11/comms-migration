@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Contacts — list{% endblock %}
 {% block content %}
-<section class="panel">
+<div class="list-page">
+<div class="list-content">
+<section class="panel list-panel">
   <div class="list-header">
     <div>
       <h1>Contacts</h1>
@@ -41,36 +43,46 @@
 </section>
 
 {% if contacts %}
-<table class="data-table">
+<table class="data-table data-table-contacts">
   <thead>
     <tr>
       <th>Name</th>
       <th>Organization</th>
+      <th>Phone</th>
       <th>Email</th>
-      <th>Groups</th>
+      <th class="col-check">Pro</th>
+      <th class="col-check">Pers</th>
+      <th class="col-check col-check-danger">Del</th>
     </tr>
   </thead>
   <tbody>
     {% for contact in contacts %}
-    <tr class="{% if contact.groups and ('Is Deleted' in contact.groups or 'is deleted' in contact.groups) %}row-deleted{% endif %}">
-      <td>
-        <a href="/contacts/{{ contact.id }}?{{ request.url.query }}">{{ contact | display_name }}</a>
-      </td>
-      <td>{{ contact.organization or "—" }}</td>
-      <td>
-        {% if contact.emails %}
-          {{ contact.emails[0].value }}
-        {% else %}
-          —
-        {% endif %}
-      </td>
-      <td class="tags">
-        {% for g in contact.groups or [] %}
-        <span class="tag">{{ g }}</span>
-        {% else %}
-        —
-        {% endfor %}
-      </td>
+    {% set contact_groups = contact.groups or [] %}
+    <tr id="contact-{{ contact.id | replace(':', '_') }}" class="contact-row {% if 'Is Deleted' in contact_groups or 'is deleted' in contact_groups %}row-deleted{% endif %}" data-contact-id="{{ contact.id }}">
+        <td>
+          <a class="contact-detail-link" href="/contacts/{{ contact.id | urlencode }}?{{ return_query }}">{{ contact | display_name }}</a>
+          {% if contact._dup_count and contact._dup_count > 1 %}
+          <span class="tag tag-dup">{{ contact._dup_count }} macOS cards</span>
+          {% endif %}
+        </td>
+        <td>{{ contact.organization or "—" }}</td>
+        <td>{{ contact | primary_phone or "—" }}</td>
+        <td>
+          {% if contact.emails %}
+            {{ contact.emails[0].value }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td class="col-check">
+          <input type="checkbox" class="group-checkbox" name="groups" value="Professional" title="Professional" {% if 'Professional' in contact_groups %}checked{% endif %}>
+        </td>
+        <td class="col-check">
+          <input type="checkbox" class="group-checkbox" name="groups" value="Personal" title="Personal" {% if 'Personal' in contact_groups %}checked{% endif %}>
+        </td>
+        <td class="col-check">
+          <input type="checkbox" class="group-checkbox" name="groups" value="Is Deleted" title="Is Deleted" {% if 'Is Deleted' in contact_groups or 'is deleted' in contact_groups %}checked{% endif %}>
+        </td>
     </tr>
     {% endfor %}
   </tbody>
@@ -88,4 +100,6 @@
 {% else %}
 <p class="empty">No contacts match your filters. Run <code>python scripts/init_contacts.py</code> to import from macOS Contacts.</p>
 {% endif %}
+</div>
+</div>
 {% endblock %}
