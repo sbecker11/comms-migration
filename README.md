@@ -149,3 +149,25 @@ automation repo, not here. The two meet only at the recruiting-funnel handoff.
 
 See `routing-inventory.md` for the full record of forwards and categorization
 routes across both hubs.
+
+---
+
+## Relationship to `job-tracker`
+
+[`job-tracker`](https://github.com/sbecker11/job-tracker) is the sibling repo
+that consumes the recruiting funnel this repo routes mail into. The split is
+deliberate and symmetric:
+
+| Repo | Owns | Does NOT own |
+|---|---|---|
+| **comms-migration** (this repo) | Routing truth: which hub/inbox a sender lands in, the four-into-one forward into `shawnbecker.recruiting@gmail.com` (see `routing-inventory.md`), contacts data, `rules/senders.yaml` | Reading, classifying, or acting on mail once it arrives |
+| **job-tracker** | Reading `shawnbecker.recruiting@gmail.com` via the Gmail API, email classification, ATS JD resolution, match scoring, the job tracker DB | Where mail is forwarded from, hub/contact routing decisions |
+
+**Handoff point:** the recruiting funnel inbox (`shawnbecker.recruiting@gmail.com`).
+This repo is the source of truth for *how mail gets there* (`routing-inventory.md`
+§1); `job-tracker` is the source of truth for *what happens once it's there*
+(Gmail API setup, classifier, pipeline — see its README).
+
+If a change affects both sides (e.g. a new forwarding source, or a new account
+feeding the recruiting funnel), update `routing-inventory.md` here first, then
+confirm `job-tracker`'s Gmail reader still points at the right inbox.
