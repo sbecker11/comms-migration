@@ -87,7 +87,7 @@ contacts/
   Contacts.yaml            # REAL data — gitignored
   Contacts.yaml.example    # synthetic schema stub — committed
   store.py                 # load/save, dedup, group migration, name matching
-  export_senders.py        # (see scripts/ — confirm canonical location)
+  export_senders.py        # library: builds senders.yaml from Contacts.yaml
   profile_text.py
 contacts_app/              # web UI for viewing/editing contacts
   main.py
@@ -97,14 +97,16 @@ rules/
   senders.yaml.example     # synthetic schema stub — committed
   actions.yaml             # Layer 3 policy (no personal data) — committed
 scripts/
-  export_senders.py        # Contacts.yaml -> senders.yaml
+  export_senders_cli.py    # CLI wrapper around contacts/export_senders.py
   default_contacts_personal.py
   sync_mac_profile_notes.py
   ...
 ```
 
-> Note: `export_senders.py` currently appears in both `contacts/` and `scripts/`.
-> Confirm which is canonical and remove the duplicate.
+> Note: routing export is split into two files, not duplicated.
+> `contacts/export_senders.py` holds the export logic (importable library);
+> `scripts/export_senders_cli.py` is a thin command-line wrapper around it.
+> Run the CLI; import the library.
 
 ---
 
