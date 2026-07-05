@@ -1,0 +1,392 @@
+# rules/rules.yaml — Layer 3 fast-path rule list. LIVE as of 2026-07-04,
+# replacing the old rules/category_rules.yaml domain/email dicts.
+#
+# An ordered list of named, toggleable rules modeled on Mail.app's rule
+# editor (see the "Add Rule" screenshots from 2026-07-04) — each rule has a
+# description, an any/all combinator, one or more field/comparator/value
+# expressions, and an action. This file started as a 1:1 behavioral port of
+# category_rules.yaml (verified byte-for-byte equivalent on all 127
+# domain/email entries plus lookalike-domain edge cases before cutover —
+# see git history for the comparison), PLUS one new example (Subject-based)
+# showing what this schema can do that plain domain matching couldn't.
+#
+# Evaluated by classifier/rules_v2_engine.py, validated against
+# rules/rules_schema.json — see classifier/rules_engine.py for how this
+# fits into the full resolution order (rules -> senders.yaml -> LLM).
+#
+# Scope (per 2026-07-04 discussion):
+#   - This only replaces the category_rules.yaml matching layer.
+#   - rules/senders.yaml (contact -> hub) is untouched.
+#   - rules/actions.yaml (category -> archive/notify/flag policy) is
+#     untouched — a rule's only action is `add_label: <category>`; what
+#     happens to that category (archive/flag/notify) still lives in
+#     actions.yaml, so that policy is defined once per category instead of
+#     once per rule.
+#
+# Evaluation semantics:
+#   - Rules are evaluated TOP TO BOTTOM. The first ACTIVE rule that matches
+#     wins (equivalent to every Mail.app rule having "stop evaluating
+#     rules" checked) — a message has exactly one category, so first-match
+#     is simpler than Mail.app's "run every matching rule" default.
+#   - `active: false` disables a rule without deleting it (mirrors the
+#     Active checkbox column in Mail.app's rule list).
+#   - `combinator: any` = OR across expressions, `all` = AND.
+#   - A `combinator: all` rule whose expressions can never ALL be true for
+#     any message (e.g. date_sent less_than_days_old 7 AND
+#     greater_than_days_old 8 — no day-count satisfies both) fails loudly
+#     at load time (classifier/rules_schema_validate.py) instead of
+#     silently compiling into a rule that never matches anything. Only a
+#     conservative set of contradictions is caught this way — see
+#     _find_unsatisfiable_expressions()'s docstring for exactly which.
+#
+# Fields available in an expression:
+#   String fields      — from, to, cc, subject, body
+#     Comparators: contains | does_not_contain | begins_with | ends_with | equals
+#     (case-insensitive; `body` == Mail.app's "Message content")
+#   Pattern field       — from_url_pattern  (regex, matched with re.search
+#     against the FULL sender address — not domain-only, so it can target
+#     local-part patterns too, e.g. 'noreply@' or a specific subdomain
+#     structure, not just "ends with this registered domain")
+#     Comparators: matches | does_not_match   (value: a regex pattern string)
+#     Since this is `re.search`, not `re.fullmatch`, an unanchored pattern
+#     like 'nytimes\.com' would match ANYWHERE in the address — use '^'/'$'
+#     to anchor when that matters. The domain-suffix rules below use the
+#     idiom '@([\w-]+\.)*DOMAIN$' (matches DOMAIN or any subdomain of it,
+#     anchored at the end of the address, right after the lone '@') to
+#     replicate the old dot-boundary-safe behavior explicitly rather than
+#     silently baking it into a comparator.
+#     A malformed regex value fails loudly at load time (see
+#     classifier/rules_schema_validate.py) rather than silently no-op'ing.
+#   Date fields         — date_sent, date_received
+#     Comparators: less_than_days_old | greater_than_days_old  (value: integer)
+#     The message's own date_sent/date_received are represented internally
+#     as `Iso8601Utc` (classifier/rules_v2_engine.py) — an ISO-8601 string
+#     with an explicit UTC offset, e.g. "2026-07-04T16:00:00Z". This is the
+#     ONE date format the engine ever parses, regardless of source; Gmail's
+#     native formats (the RFC 2822 "Date" header for date_sent, epoch-ms
+#     internalDate for date_received) are converted to it once, at the
+#     source (classifier/gmail_client.py), not by every consumer. This is
+#     about the MESSAGE's dates, not this field's `value` above (which
+#     stays a plain integer day count either way).
+#
+# Action:
+#   add_label: <category>   — must be a key in rules/actions.yaml's `categories:`
+
+rules:
+  # --- Highest priority — never auto-archive, regardless of topic ---
+  - description: "Security alerts (Google)"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*accounts\.google\.com$'
+    action:
+      add_label: security_alert
+
+  - description: "Security alerts (Microsoft)"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*accountprotection\.microsoft\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*account\.microsoft\.com$'
+    action:
+      add_label: security_alert
+
+  - description: "Security alerts (Apple / named senders)"
+    active: true
+    combinator: any
+    expressions:
+      - field: from
+        comparator: equals
+        value: appleid@id.apple.com
+      - field: from
+        comparator: equals
+        value: account-security-noreply@accountprotection.microsoft.com
+    action:
+      add_label: security_alert
+
+  # --- News ---
+  - description: "News outlets"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*nytimes\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*washingtonpost\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*wsj\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*theatlantic\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*axios\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*theskimm\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*morningbrew\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*substack\.com$' # many news/opinion newsletters; override per-sender if needed
+    action:
+      add_label: news
+
+  # --- NEW: subject-based rule — not expressible in the old domain-only
+  # schema. Mirrors your Mail.app rule "There's an ai for that" by name;
+  # adjust `value` to the actual newsletter's subject pattern once ported.
+  - description: "There's an AI for that (subject match)"
+    active: true
+    combinator: any
+    expressions:
+      - field: subject
+        comparator: contains
+        value: "There's An AI For That"
+    action:
+      add_label: ai
+
+  # --- Social ---
+  - description: "Social networks"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*facebookmail\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*linkedin\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*meetup\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*eventbrite\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*nextdoor\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*x\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*twitter\.com$'
+    action:
+      add_label: social
+
+  # --- Political ---
+  - description: "Political / campaign senders (Politics Junk)"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*actblue\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*winred\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*mobilize\.us$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*votesaveamerica\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*unitedamericangop\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*virtuousconservatives\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*marshablackburn\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*stayinformednow\.com$'
+    action:
+      add_label: political
+
+  # --- AI vendors ---
+  - description: "AI product/tool newsletters"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*openai\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*anthropic\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*mistral\.ai$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*perplexity\.ai$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*cursor\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*cursor\.sh$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*huggingface\.co$'
+      - field: from
+        comparator: equals
+        value: noreply@anthropic.com
+    action:
+      add_label: ai
+
+  # --- Church ---
+  - description: "Church of Jesus Christ communications"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*churchofjesuschrist\.org$'
+    action:
+      add_label: church
+
+  # --- Recruiter / job ---
+  - description: "Recruiter / job boards"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*indeed\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*jobcase\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*ziprecruiter\.com$'
+    action:
+      add_label: recruiter_job
+
+  # --- Vendor / transactional ---
+  - description: "Vendor / shipping / transactional receipts"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*amazon\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*amazonses\.com$' # transactional/receipt sender infra
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*shipment\-tracking\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*ups\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*fedex\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*usps\.com$'
+    action:
+      add_label: vendor_transactional
+
+  # --- Billing ---
+  - description: "Billing / payments / subscriptions"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*stripe\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*paypal\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*venmo\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*intuit\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*quickbooks\.intuit\.com$'
+    action:
+      add_label: billing
+
+  # --- Investing ---
+  - description: "Brokerage / investing statements"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*fidelity\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*schwab\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*vanguard\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*etrade\.com$'
+    action:
+      add_label: investing
+
+  # --- Insurance ---
+  - description: "Insurance carriers"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*progressive\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*geico\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*statefarm\.com$'
+    action:
+      add_label: insurance
+
+  # --- Financial / admin ---
+  - description: "Banks / tax / financial admin"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*chase\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*bankofamerica\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*wellsfargo\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*irs\.gov$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*creditkarma\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*sofi\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*sofi\.org$'
+    action:
+      add_label: financial_admin

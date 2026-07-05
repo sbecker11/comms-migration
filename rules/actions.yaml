@@ -1,25 +1,62 @@
-# Classifier actions (Layer 3) — mirrors Appendix C
-# Executed by Nextiva workflows (professional channels) or Python classifier (Phase 5)
+# Classifier actions (Layer 3) — mirrors Appendix C of comms-migration-runbook.md
+# Executed by Nextiva workflows (professional voice/SMS) or the Phase 5 Python
+# classifier (classifier/) for email across all mapped accounts.
+#
+# Each category:
+#   trigger_signals   — sender/content heuristics rules_engine.py and the LLM
+#                        fallback use to recognize the category
+#   default_action    — one of the action_tiers below
+#   target_hub        — professional | personal | split | n/a (funnel-only)
+#   human_in_loop     — true = never auto-archive/auto-send without review
+#   sensitivity       — low | medium | high (high = financial/identity data;
+#                        never auto-quarantine or auto-delete, flag instead)
+#
+# Unmatched/ambiguous senders fall through to the LLM classifier
+# (classifier/llm_classify.py), which assigns the closest category above.
+# True unknowns land in spam_unknown.
 
 categories:
+  # --- Highest priority — never auto-archive, regardless of topic ---
+  security_alert:
+    trigger_signals:
+      - account sign-in / new-device notifications
+      - password reset or change confirmations
+      - 2FA/MFA codes and "verify it's you" prompts
+      - account recovery or suspicious-activity warnings
+    default_action: notify_now
+    target_hub: n/a  # cuts across professional/personal; always surfaced regardless of hub
+    human_in_loop: true
+    sensitivity: high
+    # Added 2026-07-04 after a real Google "Security alert" email was
+    # auto-archived under financial_admin by the LLM fallback (it matched on
+    # loose account/financial topic association, not message intent). This
+    # category exists specifically to short-circuit that failure mode via
+    # rules_engine.py sender/domain matches (see rules/rules.yaml)
+    # so it never depends on the LLM correctly inferring intent.
+
+  # --- High-touch / already-automated (existing) ---
   active_client:
     trigger_signals:
       - known client domain or number
     default_action: notify_now
     sub_actions:
       - draft_reply
+    target_hub: professional
     human_in_loop: true
+    sensitivity: medium
 
   recruiter_job:
     trigger_signals:
       - recruiter language
       - job description content
       - scheduling language
-    default_action: tag
+    default_action: label_archive  # labeled + archived; job-tracker's query isn't scoped to in:inbox, so it still finds these
     sub_actions:
       - match_triage
       - draft_acknowledgment_for_review
-    human_in_loop: true
+    target_hub: n/a  # stays in the recruiting funnel; job-tracker owns processing
+    human_in_loop: false
+    sensitivity: medium
     subcategories:
       - recruiter_initial_call
       - recruiter_follow_up
@@ -30,32 +67,126 @@ categories:
     default_action: route
     target_hub: personal
     human_in_loop: false
+    sensitivity: low
 
+  # --- Sensitive / financial ---
+  # financial_admin, investing, billing: promoted to auto-archive (2026-07-04)
+  # after review of real traffic showed these are routine notices, not
+  # actionable items. insurance stays flag-only/human-in-loop below since it
+  # hasn't been reviewed yet.
   financial_admin:
     trigger_signals:
       - banks
-      - invoices
-      - account notices
-    default_action: flag
-    human_in_loop: true
+      - general account notices
+      - tax documents
+    default_action: label_archive
+    target_hub: split
+    human_in_loop: false
+    sensitivity: high
 
+  investing:
+    trigger_signals:
+      - brokerage statements
+      - trade confirmations
+      - 401k / retirement account notices
+    default_action: label_archive
+    target_hub: personal
+    human_in_loop: false
+    sensitivity: high
+
+  insurance:
+    trigger_signals:
+      - health/auto/home insurance (personal)
+      - business liability insurance (professional)
+    default_action: flag
+    target_hub: split  # health/auto/home -> personal; Spexture liability -> professional
+    human_in_loop: true
+    sensitivity: high
+
+  billing:
+    trigger_signals:
+      - subscription renewal
+      - invoice
+      - payment receipt with stored payment method
+    default_action: label_archive
+    target_hub: split  # Spexture tools/subscriptions -> professional; personal subs -> personal
+    human_in_loop: false
+    sensitivity: high
+
+  # --- Low-stakes bulk mail — safe to auto-label + auto-archive ---
   vendor_transactional:
     trigger_signals:
       - receipts
       - confirmations
-      - newsletters
-    default_action: daily_digest
+      - shipping notifications
+    default_action: label_archive
+    target_hub: personal
     human_in_loop: false
+    sensitivity: low
+
+  political:
+    trigger_signals:
+      - campaign/advocacy newsletters
+      - political fundraising language
+    default_action: label_archive
+    target_hub: personal
+    human_in_loop: false
+    sensitivity: low
+
+  social:
+    trigger_signals:
+      - social network notifications
+      - event invites (Evite/Meetup/Facebook Events)
+      - community/group digests
+    default_action: label_archive
+    target_hub: personal
+    human_in_loop: false
+    sensitivity: low
+
+  news:
+    trigger_signals:
+      - news outlet digests
+      - subscribed news alerts
+    default_action: label_archive
+    target_hub: personal
+    human_in_loop: false
+    sensitivity: low
+
+  ai:
+    trigger_signals:
+      - AI product/tool newsletters
+      - AI vendor product updates (non-job, non-billing)
+    default_action: label_archive
+    target_hub: personal
+    human_in_loop: false
+    sensitivity: low
+
+  church:
+    trigger_signals:
+      - ward/stake communications
+    default_action: label_archive
+    target_hub: personal
+    human_in_loop: false
+    sensitivity: low
 
   spam_unknown:
     trigger_signals:
       - unrecognized sender
     default_action: quarantine
+    target_hub: n/a
     human_in_loop: false
+    sensitivity: low
 
-# Action tier precedence (Phase 5 automation promotion path)
+# Action tier precedence (Phase 5 automation promotion path).
+# label_archive/quarantine/route/tag are fully automated; flag/notify_now/
+# draft_for_approval always keep a human in the loop.
 action_tiers:
   - notify_now
+  - flag
+  - tag
+  - route
+  - label_archive
   - digest
   - draft_for_approval
+  - quarantine
   - auto_handle

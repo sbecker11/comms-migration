@@ -3,3 +3,17 @@ uvicorn[standard]>=0.32.0
 jinja2>=3.1.0
 python-multipart>=0.0.12
 pyyaml>=6.0.2
+
+# classifier/ — Phase 5 categorization & action layer
+google-api-python-client>=2.149.0
+google-auth-oauthlib>=1.2.1
+anthropic>=0.40.0
+python-dotenv>=1.0.0
+jsonschema>=4.23.0
+# Pinned, not >=: the 4.16.0.0 wheel for macOS has a broken native/Python
+# binding mismatch (AttributeError: Z3_mk_seq_replace_all not found) — see
+# classifier/rules_satisfiability.py. 4.13.0.0 verified working.
+z3-solver==4.13.0.0
+
+# dev
+pytest>=8.0.0

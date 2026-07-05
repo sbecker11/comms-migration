@@ -128,25 +128,29 @@ Three drafted variants (professional / casual / short text) are available in the
 
 ---
 
-## Phase 5 — Categorization & action layer (optional, later)
+## Phase 5 — Categorization & action layer
 
 **Native Nextiva** gives you sentiment, classification, routing, and post-interaction summaries for its channels out of the box.
 
-**Custom classifier** (your build) for full control and a single pane — full stack and dataflow in **Appendix D**:
+**Custom classifier** — **built**, lives in `classifier/` (see the repo README's "Categorization & action layer" section for setup/usage). Full stack and dataflow in **Appendix D**:
 
-- Normalize every channel to one schema (Appendix B).
-- Categorize by **source + subject + content**.
-- Action tiers: **Notify now** → **Digest** → **Draft for approval** → **Auto-handle** (`rules/actions.yaml`).
-- Keep **human-in-the-loop** on client/recruiter-facing actions; promote categories to full automation only after watching them behave.
-- The same classifier can point at the personal hub if you ever want uniform processing under _your_ control rather than the vendor's.
+- Normalizes email into one schema (Appendix B — `classifier/models.py`).
+- Categorizes by **known bulk-sender domain** → **known contact/hub** → **LLM fallback** (`classifier/rules_engine.py`, `classifier/llm_classify.py`).
+- Taxonomy covers both the original set (active_client, recruiter_job, personal, financial_admin, vendor_transactional, spam_unknown) and the categories added to handle everything else mixed into the mapped accounts: political, social, news, ai, church, investing, insurance, billing — all unified in `rules/actions.yaml`. A `security_alert` category (2026-07-04) sits above all of these: it's matched first via `rules/rules.yaml` sender/domain rules and always wins regardless of topic, specifically so an account sign-in/2FA/password-reset notice can never be misfiled under a topic-based category (e.g. `financial_admin`) and silently auto-archived.
+- `rules/rules.yaml` (2026-07-04) replaced the old flat `category_rules.yaml` domain/email dicts with an ordered list of named, toggleable rules modeled on Mail.app's rule editor — each rule has a description, an any/all combinator, one or more field/comparator/value expressions (From/To/Cc/Subject/body/date, contains/begins-with/ends-with/equals/etc.), and an `add_label` action. Validated against `rules/rules_schema.json` at load time (`classifier/rules_v2_engine.py`), which also cross-checks every `add_label` against `actions.yaml`'s real categories. This unlocked Subject-based rules (e.g. matching a specific newsletter by subject line) that plain domain matching couldn't express. Cutover was verified byte-for-byte against the old engine on all 127 prior domain/email entries plus lookalike-domain edge cases before the old file was retired.
+- `from_domain` (2026-07-05) was further generalized to `from_url_pattern` — a regex (`matches`/`does_not_match`, `re.search`) against the sender's full address rather than just the domain, so a rule can also target local-part patterns (e.g. any `noreply@` sender on a provider), not only "is this domain or a subdomain of it". All prior domain-suffix rules were mechanically rewritten to the equivalent regex idiom `'@([\w-]+\.)*DOMAIN$'`, self-verified against the pre-transform rule list before cutover. Regex compileability of every `from_url_pattern` value is checked at load time (`classifier/rules_schema_validate.py`), separate from the JSON Schema check.
+- Contradiction detection for `combinator: all` rules started (2026-07-05) as hand-coded pairwise pattern checks in `rules_schema_validate.py` (date-range conflicts, `equals` vs. `contains`/`begins_with`/`ends_with`, etc.), then the same day was replaced with a Z3-backed decision procedure (`classifier/rules_satisfiability.py`) once it became clear pairwise enumeration doesn't scale and had already missed real cases (two incompatible `begins_with` values; contradictions between `from` and `from_url_pattern`, which the pairwise version's field-name grouping structurally couldn't see). Every expression in an `all` rule becomes one Z3 constraint (Z3's native string theory for `contains`/`begins_with`/`ends_with`/`equals`, linear arithmetic for the date fields); one `solver.check()` call decides the whole rule, and `unsat_core()` reports the minimal conflicting subset. `from_url_pattern` regex isn't translated into Z3's regex theory yet (see the README's "Two ways we check rule satisfiability" section for the complete-vs-good-enough breakdown of what this does and doesn't cover). Since even this can't structurally catch a rule that's satisfiable but never happens in real mail, or is always shadowed by an earlier rule, `classifier/rule_telemetry.py` (2026-07-05) adds a complementary *empirical* safety net: every classifier run evaluates every active rule against every message (`rules_v2_engine.all_rule_hits`, independent of which rule actually wins) and persists hit/miss counts to the gitignored `rules/.rule_match_stats.json`; a rule with 200+ observed messages and zero matches is flagged as likely-dead in `run_classifier.py`'s output and via the standalone `scripts/check_dead_rules.py` (no Gmail calls needed). Advisory only, not a load-time gate.
+- Action tiers: **Notify now / Flag** (human-in-loop, never auto-archived — currently just `insurance`, pending review) → **Label + archive** (most categories, including political, social, news, ai, church, vendor, recruiter_job, billing, investing, financial_admin — promoted here 2026-07-04 after real-batch review showed these are routine rather than actionable) → **Quarantine** (unresolved/unknown senders). Digest and draft-for-approval tiers are defined in the taxonomy but not yet wired to an executor.
+- `recruiter_job` is recognized and labeled by this classifier everywhere, but `job-tracker` still owns triage/processing of that category end-to-end. Whether it's also archived is **account-specific** (`classifier/actions.NEVER_ARCHIVE_CATEGORIES_BY_ACCOUNT`, added 2026-07-04): archived on `personal_hub` (job-tracker's pickup query there, `label:Category/recruiter_job is:unread`, isn't scoped to `in:inbox`, so archiving is harmless); label-only on `recruiting_funnel` (job-tracker's *default* query on that account IS scoped to `in:inbox`, so archiving before job-tracker's own poll would silently hide mail from it).
+- Currently wired to both Gmail-API-reachable mailboxes: the recruiting funnel and the personal hub (`scbboston@gmail.com`) — the full taxonomy runs on both, not just `personal_hub`. The Yahoo/MIT aliases don't need separate registration since their mail already lands inside the personal hub via forwarding (Phase 2); `shawn.becker@spexture.com` (Hostinger-hosted) would need IMAP support to bring in, not yet built.
 
 **Recommended phasing for custom code:**
 
-| Sub-phase | Scope | Custom code? |
-|---|---|---|
-| 5a | Nextiva for voice/SMS; Gmail filters for personal | No |
-| 5b | Python watcher on `scbboston@gmail.com` for misrouted business mail | Small Python service |
-| 5c | Unified pane: Gmail + Nextiva → one normalized inbox | Full Python aggregator |
+| Sub-phase | Scope | Custom code? | Status |
+|---|---|---|---|
+| 5a | Nextiva for voice/SMS; Gmail filters for personal | No | Done (Phase 2) |
+| 5b | Python classifier on the recruiting funnel + `scbboston@gmail.com`, rules + LLM fallback, label/archive actions | Small Python service (`classifier/`) | **Built** — polling only, run manually via `scripts/run_classifier.py` |
+| 5c | Real-time trigger (Gmail Pub/Sub watch instead of polling) + Nextiva → one normalized, always-on pipeline | Full Python aggregator | Not built |
 
 ---
 
@@ -215,14 +219,26 @@ Three drafted variants (professional / casual / short text) are available in the
 
 ## Appendix C — Category → signal → action
 
-| Category               | Trigger signals                            | Default action                                      |
-| ---------------------- | ------------------------------------------ | --------------------------------------------------- |
-| Active client          | Known client domain/number                 | Notify now; draft reply (hold for approval)         |
-| Recruiter / job        | Recruiter language, JD content, scheduling | Tag → match-triage; draft acknowledgment for review |
-| Personal               | Known personal contact                     | Route to personal hub                               |
-| Financial / admin      | Banks, invoices, account notices           | Flag; no auto-action                                |
-| Vendor / transactional | Receipts, confirmations, newsletters       | Daily digest                                        |
-| Spam / unknown         | Unrecognized sender                        | Quarantine                                          |
+Full machine-readable version: `rules/actions.yaml` (source of truth — this
+table mirrors it, don't let them drift).
+
+| Category               | Trigger signals                            | Default action                                      | Human-in-loop |
+| ---------------------- | ------------------------------------------ | ---------------------------------------------------- | ------------- |
+| Security alert         | Sign-in/new-device, password reset, 2FA codes, account-recovery warnings — from ANY sender | Notify now; never auto-archived | Yes (added 2026-07-04, highest priority) |
+| Active client          | Known client domain/number                 | Notify now; draft reply (hold for approval)         | Yes           |
+| Recruiter / job        | Recruiter language, JD content, scheduling | Label + archive on `personal_hub`; label-only (never archived) on `recruiting_funnel` — account-specific, see notes above | No (owned by `job-tracker`) |
+| Personal               | Known personal contact                     | Route to personal hub                               | No            |
+| Financial / admin      | Banks, invoices, account notices           | Label + archive                                     | No            |
+| Investing              | Brokerage statements, trade confirmations  | Label + archive                                     | No            |
+| Insurance              | Health/auto/home (personal); liability (professional) | Flag; no auto-action                     | Yes (not yet reviewed) |
+| Billing                | Subscriptions, invoices, payment receipts  | Label + archive                                     | No            |
+| Vendor / transactional | Receipts, confirmations, shipping notices  | Label + archive                                     | No            |
+| Political              | Campaign/advocacy newsletters              | Label + archive                                     | No            |
+| Social                 | Social network notifications, event invites | Label + archive                                    | No            |
+| News                   | News outlet digests/alerts                 | Label + archive                                     | No            |
+| AI                     | AI product/tool newsletters                | Label + archive                                     | No            |
+| Church                 | Ward/stake communications                  | Label + archive                                     | No            |
+| Spam / unknown         | Unrecognized sender                        | Quarantine                                          | No            |
 
 ---
 
@@ -375,24 +391,37 @@ New mail in Gmail / Workspace          Nextiva webhook (if available)
 | **Gmail filter → forward** | Filter forwards to `classifier@yourdomain` | Hacky; loses threading |
 | **Mac Mail rules** | Local on IMAP sync | Not suitable as primary trigger |
 
-### Suggested project layout (Phase 5b/5c)
+### Project layout (Phase 5b — built; Phase 5c not yet)
 
 ```
 comms-migration/
   comms-migration-runbook.md
   rules/
-    senders.yaml          # destination rule (Layer 2)
-    actions.yaml          # category → action (Layer 3)
-  classifier/             # Phase 5 — not built yet
-    main.py               # FastAPI webhook + Pub/Sub subscriber
-    normalize.py          # raw message → Appendix B record
-    rules_engine.py       # load YAML, lookup sender → target_hub
-    classify.py           # LLM for ambiguous subcategory
-    gmail_client.py       # labels, drafts, history checkpoint
-    actions.py            # execute suggested_action
+    senders.yaml           # destination rule (Layer 2)
+    rules.yaml             # Mail.app-style rule list → category (Layer 3 fast path)
+    rules_schema.json       # JSON Schema for rules.yaml
+    actions.yaml           # category → action (Layer 3 policy)
+  classifier/              # Phase 5b — built (polling, run manually)
+    models.py              # raw message → Appendix B record
+    gmail_client.py        # multi-account: list/fetch/label/archive
+    rules_engine.py        # load YAML, lookup message → (hub, category)
+    rules_v2_engine.py     # evaluates rules.yaml's field/comparator/action expressions
+    rules_schema_validate.py # validates rules.yaml against schema + actions.yaml
+    rules_satisfiability.py # Z3-backed "all" rule contradiction detection
+    rule_telemetry.py      # empirical dead-rule detection (hit/miss counts)
+    llm_classify.py        # LLM for ambiguous senders
+    actions.py             # execute suggested_action
+    run.py                 # orchestrates one classification pass
+  scripts/
+    run_classifier.py      # CLI entrypoint
+    validate_rules.py      # CLI: validate a rules.yaml file standalone
+    check_dead_rules.py    # CLI: report likely-dead rules from telemetry
+  tests/                   # mocked Gmail/Anthropic, no live calls
 ```
 
-Deploy target: Cloud Run, Fly.io, or a home server with a stable HTTPS endpoint for Pub/Sub push.
+Phase 5c (not yet built) would replace manual polling with a real-time
+trigger: FastAPI webhook + Gmail Pub/Sub subscriber, deployed to Cloud Run,
+Fly.io, or a home server with a stable HTTPS endpoint for Pub/Sub push.
 
 ### Example: destination lookup (`rules/senders.yaml`)
 

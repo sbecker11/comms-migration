@@ -67,12 +67,13 @@ phones, or anything derived from contacts) stays local with an `.example` stub.
 |-------|------|----------|----------------------------|------------|
 | 1 — Data | `contacts/Contacts.yaml` | The actual address book: who exists, their emails/phones, hub assignment | Edited via the contacts app | **No — gitignored** (stub: `Contacts.yaml.example`) |
 | 2 — Routing | `rules/senders.yaml` | Compiled lookup of which hub each email/phone/domain routes to | Generated from Layer 1 (`export_senders.py`) | **No — gitignored** (stub: `senders.yaml.example`) |
-| 3 — Actions | `rules/actions.yaml` | What to *do* per category (notify, tag, digest, quarantine…), trigger signals, action tiers | Hand-authored (mirrors the runbook, Appendix C) | **Yes — committed** |
+| 3 — Actions | `rules/actions.yaml` + `rules/rules.yaml` | What to *do* per category (notify, tag, digest, quarantine…), trigger signals, action tiers, and a Mail.app-style rule list (named, toggleable, From/To/Cc/Subject/body/date conditions) → category | Hand-authored (mirrors the runbook, Appendix C) | **Yes — committed** (no personal data in either) |
 
 Why the split falls where it does: Layers 1 and 2 name real people, so they never
-enter git. Layer 3 is pure policy — categories and actions, no personal data — so
-it is safe to commit and is its own reference (no stub needed). `actions.yaml` is
-documented in `comms-migration-runbook.md`.
+enter git. Layer 3 is pure policy — categories, actions, and public bulk-sender
+domains/rules, no personal data — so it is safe to commit and is its own
+reference (no stub needed). `actions.yaml` and `rules.yaml` are documented in
+`comms-migration-runbook.md`.
 
 **Deciding any new `rules/` file:** does it name real people, or only describe
 behavior? Names → gitignore it and add an `.example` stub. Behavior only → commit
@@ -95,12 +96,30 @@ contacts_app/              # web UI for viewing/editing contacts
 rules/
   senders.yaml             # GENERATED real data — gitignored
   senders.yaml.example     # synthetic schema stub — committed
+  rules.yaml               # Mail.app-style rule list -> category — committed
+  rules_schema.json        # JSON Schema for rules.yaml — committed
   actions.yaml             # Layer 3 policy (no personal data) — committed
+  .rule_match_stats.json  # GENERATED per-rule hit/miss telemetry — gitignored
+classifier/                 # Phase 5 — categorization & action layer (built)
+  models.py                # Appendix B canonical message record
+  gmail_client.py          # multi-account Gmail API (list/fetch/label/archive)
+  rules_engine.py          # message -> (hub, category) lookup, rules-only
+  rules_v2_engine.py       # evaluates rules.yaml's field/comparator/action expressions
+  rules_schema_validate.py # validates rules.yaml against rules_schema.json + actions.yaml
+  rules_satisfiability.py  # Z3-backed "all" rule contradiction detection (see below)
+  rule_telemetry.py        # empirical dead-rule detection (see below)
+  llm_classify.py          # LLM fallback categorization for unresolved senders
+  actions.py               # execute the resolved action against Gmail
+  run.py                   # orchestrates one classification pass
 scripts/
   export_senders_cli.py    # CLI wrapper around contacts/export_senders.py
+  run_classifier.py        # CLI: classify + act on one mapped Gmail account
+  validate_rules.py        # CLI: schema + contradiction validation for rules.yaml
+  check_dead_rules.py      # CLI: report likely-dead rules from accumulated telemetry
   default_contacts_personal.py
   sync_mac_profile_notes.py
   ...
+tests/                      # pytest — mocks Gmail/Anthropic, no live calls
 ```
 
 > Note: routing export is split into two files, not duplicated.
@@ -138,7 +157,285 @@ python scripts/default_contacts_personal.py
 
 # Run the contacts web app   (confirm the actual entrypoint/command)
 python contacts_app/main.py
+
+# Classify inbox mail for one mapped Gmail account (see "Categorization &
+# action layer (classifier/)" below before running without --dry-run)
+python scripts/run_classifier.py --account personal_hub --dry-run --limit 25
 ```
+
+---
+
+## Categorization & action layer (`classifier/`)
+
+Implements Phase 5 of `comms-migration-runbook.md`: reads mail from a mapped
+Gmail account, resolves a category (`rules/actions.yaml`), and applies the
+configured action — label, and archive out of the inbox for most categories
+(political, social, news, ai, church, vendor mail, recruiter_job, billing,
+investing, financial_admin — as of 2026-07-04, after a real batch showed
+these are routine notices rather than actionable items). `insurance` is the
+one remaining sensitive category still flagged/labeled but never
+auto-archived (`human_in_loop: true`), since it hasn't been reviewed against
+real traffic yet.
+
+**Resolution order** (cheapest/most certain first):
+
+1. `rules/rules.yaml` — an ordered list of named, toggleable rules modeled
+   on Mail.app's rule editor (see "Rule schema (`rules/rules.yaml`)"
+   below): known bulk-sender domains (nytimes.com → `news`, facebookmail.com
+   → `social`, etc.), plus optional Subject/To/Cc/body/date conditions —
+   free, instant.
+2. `rules/senders.yaml` — known contacts from your address book resolve to
+   `active_client` (professional) or `personal`.
+3. LLM fallback (`classifier/llm_classify.py`, Claude Haiku) — only for
+   senders neither of the above recognizes. Cheap, and every new rule you
+   add to `rules.yaml` shrinks this tail further.
+4. Anything the LLM call itself fails on lands in `spam_unknown`
+   (quarantine) rather than blocking the run.
+
+### Rule schema (`rules/rules.yaml`)
+
+Replaced the old flat domain/email dicts (2026-07-04) with a schema modeled
+directly on Mail.app's rule editor, so the mental model transfers straight
+from managing your existing Mail rules:
+
+```yaml
+rules:
+  - description: "News outlets"        # like Mail.app's rule name
+    active: true                       # like the Active checkbox — disable without deleting
+    combinator: any                    # any = OR, all = AND across expressions
+    expressions:
+      - field: from_url_pattern        # from | to | cc | subject | body | from_url_pattern | date_sent | date_received
+        comparator: matches            # contains | does_not_contain | begins_with | ends_with | equals | matches | does_not_match
+        value: '@([\w-]+\.)*nytimes\.com$'  # regex; date fields use less_than_days_old / greater_than_days_old + an integer
+    action:
+      add_label: news                  # must be a category key in rules/actions.yaml
+```
+
+Rules are evaluated top-to-bottom; the first active match wins. A rule's
+only action is `add_label` — it resolves *what a message is*; `actions.yaml`
+still separately owns *what to do about it* (archive/notify/flag), once per
+category rather than once per rule.
+
+`rules/rules_schema.json` (JSON Schema) enforces valid `field`/`comparator`/
+`combinator` values, and `classifier/rules_v2_engine.load_rules()` also
+cross-checks every `add_label` against `actions.yaml`'s real category list,
+every `from_url_pattern` value compiles as a regex, rejects duplicate rule
+descriptions, and — for `combinator: all` rules — rejects jointly
+unsatisfiable expressions. That last check hands the rule's *entire*
+expression list to [Z3](https://github.com/Z3Prover/z3) (an SMT solver —
+automated theorem proving, not machine learning) as one conjunction of
+constraints and asks whether any message could satisfy all of them at
+once, e.g.:
+  - `date_sent less_than_days_old 7` AND `greater_than_days_old 8` (never
+    both true for any message);
+  - `from equals "dog"` AND `from ends_with "ty"` (no value satisfies both);
+  - `subject begins_with "invoice"` AND `does_not_contain "Invoice"` (Z3's
+    string theory natively knows `begins_with` implies `contains` — this
+    isn't hand-coded anywhere);
+  - `from equals "bob@x.com"` AND `from_url_pattern`-target `from begins_with
+    "alice"` (`from` and `from_url_pattern` constrain the identical
+    sender-address value, modeled as one shared variable).
+
+A malformed, stale, or self-contradictory `rules.yaml` fails loudly at load
+time instead of silently misclassifying mail or silently never matching
+anything. Validate manually anytime with:
+
+```bash
+python scripts/validate_rules.py
+```
+
+### Two ways we check rule satisfiability: complete vs. good-enough
+
+A natural question once a rule can have many `all`-combined expressions:
+*"can we just detect every possible contradiction?"* The honest answer is
+two different techniques, covering two different (non-overlapping) blind
+spots, neither of which alone is 100% complete:
+
+**1. Static: Z3 (`classifier/rules_satisfiability.py`) — complete for what
+it models, incomplete in scope.** Turning each expression into a Z3
+constraint and asking `solver.check()` is a *complete and correct*
+decision procedure for the comparator vocabulary it actually models:
+`contains` / `does_not_contain` / `begins_with` / `ends_with` / `equals` on
+`from`/`to`/`cc`/`subject`/`body`, plus `less_than_days_old` /
+`greater_than_days_old` on the date fields. "Complete" here means: for
+every combination of those constraints, Z3 will correctly say `sat` or
+`unsat` — there is no case in that vocabulary it can get wrong or miss,
+unlike the hand-coded pairwise version this replaced (2026-07-05), which
+had to be told about each contradiction *shape* individually and, despite
+several rounds of additions, still missed real cases like two `begins_with`
+values with incompatible prefixes (`"cat"` and `"dog"` — a string can't
+start with both, but nothing checked that) and couldn't see a contradiction
+between a `from` expression and a `from_url_pattern` expression at all,
+since it grouped strictly by schema field-name rather than by what
+real-world value each field actually constrains.
+
+But "complete for what it models" has a real asterisk: **`from_url_pattern`'s
+regex (`matches`/`does_not_match`) is not modeled at all** — those
+expressions contribute no constraint to the solve (see
+`rules_satisfiability.py`'s docstring, "Scope"). This is the deliberate
+"good-enough" cut for now: Z3 *can* reason about regexes (its `InRe`/`Re.*`
+combinators), but translating Python's `re` syntax into Z3's regex AST is
+real, separate engineering work, and every `from_url_pattern` rule in
+`rules.yaml` today uses one simple idiom (the domain-suffix regex). Getting
+to a *fully* complete solution would mean: (a) translating that regex
+vocabulary into Z3's theory, and (b) adding length constraints if we ever
+need them (length is what makes genuinely irreducible 3-or-more-way
+contradictions possible — e.g. `begins_with "ab"` AND `ends_with "yz"` AND
+some length bound too short for both to fit without overlapping; without
+length constraints, and within the current comparator set, every
+contradiction we've found actually does reduce to a pairwise check
+somewhere — Z3's real advantage today is getting *every* one of those
+pairwise cases correct automatically, at the cost of zero per-pair code,
+rather than catching contradictions no pairwise reasoning could ever find).
+Neither extension is done; both are straightforward to add to this same
+architecture later without restructuring anything, which is precisely the
+scalability problem the old hand-coded approach didn't have an answer to.
+
+**2. Empirical: `classifier/rule_telemetry.py` — good-enough by design,
+catches what static analysis structurally never can.** No static
+checker — Z3-based or otherwise — can ever prove a rule is dead for a
+reason outside its own model: a rule that's logically satisfiable but whose
+premise just never holds for real mail (e.g. `body contains "invoice"` when
+no actual sender phrases it that way), a rule always shadowed by an earlier
+one in the list, or (today) any contradiction purely inside `from_url_pattern`
+regexes. So this takes the opposite approach entirely: every classifier run
+evaluates *every* active rule against *every* message (not just the first
+match, unlike the real classify step) and persists hit/miss counts to the
+gitignored `rules/.rule_match_stats.json`. A rule that's accumulated enough
+observations (200+ messages by default) with zero matches is flagged as
+likely-dead — the same signal regardless of *why* it's dead, including
+reasons no static model, however complete, could ever anticipate. The
+trade-off: it's advisory, not a load-time gate (a fresh rule just hasn't
+seen a matching message *yet*), and it needs real traffic to accumulate
+before it can say anything at all.
+
+**In short:** Z3 gives us certainty, fast, at load time — for the part of
+the problem it's told to model. Telemetry gives us coverage of everything
+else, slowly, only after real mail has flowed through. Running both is
+"good enough" in practice; neither alone would be.
+
+Check accumulated telemetry anytime without touching Gmail via:
+
+```bash
+python scripts/check_dead_rules.py
+```
+
+**`from_url_pattern`** (2026-07-05, renamed from `from_domain`) is a regex
+matched with `re.search` against the sender's **full address**, not just
+the domain — so a rule can target the local-part too (e.g. any `noreply@`
+sender on a given provider), not only "is this domain or a subdomain of
+it". Since it's `re.search` rather than `re.fullmatch`, an unanchored
+pattern matches anywhere in the address — use `^`/`$` to anchor when that
+matters. Every domain-suffix rule uses the idiom
+`'@([\w-]+\.)*DOMAIN$'` (matches `DOMAIN` or any subdomain of it, anchored
+right after the address's one `@`) to replicate the old dot-boundary-safe
+behavior explicitly, since plain string `ends_with` on a bare domain has
+real false-positive risk (`fakenextdoor.com` matching `nextdoor.com`). An
+invalid regex value fails loudly at load time rather than silently
+no-op'ing.
+
+**`date_sent`/`date_received`** always represent the *message's* dates as
+`Iso8601Utc` (`classifier/rules_v2_engine.py`) — an ISO-8601 string with an
+explicit UTC offset, e.g. `"2026-07-04T16:00:00Z"`. Gmail's native formats
+(the RFC 2822 `Date` header; epoch-ms `internalDate`) are converted to this
+once, at the source (`classifier/gmail_client.py`), so the rule engine only
+ever has one date format to parse regardless of where a message came from.
+(This is about the message's own dates, not a rule's `value` — that stays
+a plain integer day count either way, e.g. `value: 30` for
+`less_than_days_old`.)
+
+`recruiter_job` mail is recognized and labeled (`Category/recruiter_job`)
+everywhere — that category is still owned end-to-end by the sibling
+`job-tracker` repo — but whether it's also **archived** depends on the
+account, per `classifier/actions.NEVER_ARCHIVE_CATEGORIES_BY_ACCOUNT`:
+
+- **`personal_hub`**: archived like any other `label_archive` category.
+  job-tracker's pickup query for this account
+  (`label:Category/recruiter_job is:unread`) isn't scoped to `in:inbox`,
+  so archiving doesn't hide anything from that pipeline — it just tidies
+  the inbox. See job-tracker's README ("Optional: also read
+  `scbboston@gmail.com`") for pointing it at `--query
+  "label:Category/recruiter_job is:unread" --account personal_hub` to pick
+  up exactly this pre-filtered set, fully automated, no manual forwarding.
+- **`recruiting_funnel`**: labeled but **never archived**. job-tracker's
+  *default* query on this account (its primary one) IS scoped to
+  `in:inbox`, so archiving here before job-tracker's own poll runs would
+  silently hide mail from it — the same class of gap this whole project
+  exists to close, just flipped to the other account. The classifier is
+  also run against this account (in addition to `personal_hub`) so the
+  full category taxonomy — political, social, news, security_alert, etc.
+  — gets applied there too; only `recruiter_job`'s archive behavior
+  differs.
+
+### Setup (per Gmail account)
+
+Labeling/archiving needs the `gmail.modify` OAuth scope (broader than
+job-tracker's read-only scope), so each account needs its own consent flow
+even if you've already authorized job-tracker against
+`shawnbecker.recruiting@gmail.com`.
+
+```bash
+# 1. Anthropic key for the LLM fallback
+cp .env.example .env   # then fill in ANTHROPIC_API_KEY
+
+# 2. Per account: download an OAuth Desktop client (Google Cloud Console)
+#    for that Google account, then place/point at it. The same OAuth
+#    client (client_secret_*.json) can be reused across accounts — each
+#    account just needs its own copy under its own config directory so it
+#    gets its own token.json.
+mkdir -p ~/.config/comms-classifier/personal_hub
+cp ~/Downloads/client_secret_*.json ~/.config/comms-classifier/personal_hub/credentials.json
+#    (or set COMMS_CLASSIFIER_PERSONAL_CREDENTIALS to its path instead)
+
+mkdir -p ~/.config/comms-classifier/recruiting_funnel
+cp ~/.config/comms-classifier/personal_hub/credentials.json ~/.config/comms-classifier/recruiting_funnel/credentials.json
+#    (or set COMMS_CLASSIFIER_RECRUITING_CREDENTIALS to its path instead)
+
+# 3. First run opens a browser for consent and caches a token.json
+#    alongside the credentials for that account. This is a SEPARATE
+#    consent/token from job-tracker's, even for the same Gmail account —
+#    job-tracker only ever requests gmail.readonly, while this classifier
+#    needs gmail.modify to label/archive.
+python scripts/run_classifier.py --account personal_hub --dry-run --limit 10
+python scripts/run_classifier.py --account recruiting_funnel --dry-run --limit 10
+```
+
+Registered accounts live in `classifier/gmail_client.ACCOUNTS`
+(`recruiting_funnel`, `personal_hub` today). The classifier runs against
+**both** — `recruiting_funnel` gets the full category taxonomy too, not
+just `recruiter_job` handling (see "recruiter_job mail" above for the one
+behavioral difference between the two accounts). `shawn.becker@yahoo.com`
+and `sbecker@alum.mit.edu` are forward-only aliases with no mailbox of
+their own (Phase 2) — their mail already lands inside `personal_hub`, so
+they don't need separate registration.
+
+**Always dry-run a new account first.** `--dry-run` reports exactly what
+would be labeled/archived without calling any mutating Gmail API.
+
+#### Re-authenticating when a login expires (expect this ~weekly)
+
+This OAuth app is in Google's **"Testing" publishing status** (unverified —
+the "Google hasn't verified this app" screen you click through on every
+login). Google hard-expires refresh tokens issued to Testing-status apps
+**after 7 days, regardless of use**. This isn't a bug — every account
+authenticated against this app (`recruiting_funnel`, `personal_hub`, or any
+future one) will need to be re-authenticated on this cadence until/unless
+the app is moved to "In production" status.
+
+**No manual prep needed.** When a cached token has expired, the next
+`run_classifier.py` invocation will print something like:
+
+```
+Cached Gmail token for 'personal_hub' is no longer valid (...). Re-opening
+browser for a fresh login — this is expected roughly weekly while this app
+is in Google's 'Testing' publishing status ...
+```
+
+and a browser window opens automatically — same as your very first consent
+for that account. Sign in as the **same** Gmail account named in the
+message, click through the "unverified app" warning as before, approve
+access, and the command continues. You don't need to delete `token.json`
+by hand; the code detects the failed refresh and re-opens the login flow.
 
 ---
 
@@ -162,7 +459,7 @@ deliberate and symmetric:
 
 | Repo | Owns | Does NOT own |
 |---|---|---|
-| **comms-migration** (this repo) | Routing truth: which hub/inbox a sender lands in, the four-into-one forward into `shawnbecker.recruiting@gmail.com` (see `routing-inventory.md`), contacts data, `rules/senders.yaml` | Reading, classifying, or acting on mail once it arrives |
+| **comms-migration** (this repo) | Routing truth: which hub/inbox a sender lands in, the three-into-one forward into `shawnbecker.recruiting@gmail.com` (see `routing-inventory.md`), contacts data, `rules/senders.yaml` | Reading, classifying, or acting on mail once it arrives |
 | **job-tracker** | Reading `shawnbecker.recruiting@gmail.com` via the Gmail API, email classification, ATS JD resolution, match scoring, the job tracker DB | Where mail is forwarded from, hub/contact routing decisions |
 
 **Handoff point:** the recruiting funnel inbox (`shawnbecker.recruiting@gmail.com`).

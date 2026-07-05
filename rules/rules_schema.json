@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "comms-migration/rules_schema.json",
+  "title": "comms-migration classifier rules (rules/rules.yaml)",
+  "description": "Validates the Mail.app-style rule list, live since 2026-07-04. See the header comment in rules/rules.yaml for the full design rationale. Category names in `action.add_label` are NOT enumerated here (they'd drift out of sync with rules/actions.yaml) — validate those separately against actions.yaml's `categories:` keys at load time.",
+  "type": "object",
+  "required": ["rules"],
+  "additionalProperties": false,
+  "properties": {
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/rule" }
+    }
+  },
+  "definitions": {
+    "rule": {
+      "type": "object",
+      "required": ["description", "active", "combinator", "expressions", "action"],
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string", "minLength": 1 },
+        "active": { "type": "boolean" },
+        "combinator": { "type": "string", "enum": ["any", "all"] },
+        "expressions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/expression" }
+        },
+        "action": { "$ref": "#/definitions/action" }
+      }
+    },
+    "expression": {
+      "type": "object",
+      "required": ["field", "comparator", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string",
+          "enum": [
+            "from", "to", "cc", "subject", "body",
+            "from_url_pattern",
+            "date_sent", "date_received"
+          ]
+        },
+        "comparator": {
+          "type": "string",
+          "enum": [
+            "contains", "does_not_contain", "begins_with", "ends_with", "equals",
+            "matches", "does_not_match",
+            "less_than_days_old", "greater_than_days_old"
+          ]
+        },
+        "value": { "type": ["string", "integer"] }
+      },
+      "allOf": [
+        {
+          "comment": "String fields: from/to/cc/subject/body — full string comparator set, string value.",
+          "if": {
+            "properties": { "field": { "enum": ["from", "to", "cc", "subject", "body"] } }
+          },
+          "then": {
+            "properties": {
+              "comparator": {
+                "enum": ["contains", "does_not_contain", "begins_with", "ends_with", "equals"]
+              },
+              "value": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "comment": "from_url_pattern — regex (re.search) against the FULL sender address, not just the domain. Regex compileability of `value` is checked separately in classifier/rules_schema_validate.py, since JSON Schema alone can't validate that.",
+          "if": {
+            "properties": { "field": { "const": "from_url_pattern" } }
+          },
+          "then": {
+            "properties": {
+              "comparator": {
+                "enum": ["matches", "does_not_match"]
+              },
+              "value": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "comment": "Date fields: date_sent/date_received — only the days-old comparators, integer value.",
+          "if": {
+            "properties": { "field": { "enum": ["date_sent", "date_received"] } }
+          },
+          "then": {
+            "properties": {
+              "comparator": {
+                "enum": ["less_than_days_old", "greater_than_days_old"]
+              },
+              "value": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      ]
+    },
+    "action": {
+      "type": "object",
+      "required": ["add_label"],
+      "additionalProperties": false,
+      "properties": {
+        "add_label": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

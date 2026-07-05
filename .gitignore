@@ -4,3 +4,9 @@ __pycache__/
 *.pyc
 .DS_Store
 rules/senders.yaml
+rules/.rule_match_stats.json
+
+# classifier/ local secrets/config — never commit real credentials or tokens
+.env
+credentials.json
+token.json
