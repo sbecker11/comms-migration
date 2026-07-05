@@ -110,6 +110,50 @@ rules:
     action:
       add_label: security_alert
 
+  # Domain-agnostic fallback for the exact failure mode security_alert was
+  # created for (see actions.yaml's comment on this category): the three
+  # sender-specific rules above only cover known providers (Google,
+  # Microsoft, Apple). Any OTHER site's password-reset/change notice (e.g.
+  # a university alumni portal, a random SaaS vendor) has no sender rule
+  # here, falls through to the LLM, and the LLM can misjudge it as
+  # "personal" or "financial_admin" rather than recognizing the security
+  # intent — exactly what happened 2026-07-05 with an MIT alumni portal's
+  # "Infinite Connection: password updated"/"reset password instructions"
+  # emails. This rule catches that language regardless of sender.
+  - description: "Security alerts (password/account activity, any sender)"
+    active: true
+    combinator: any
+    expressions:
+      - field: subject
+        comparator: contains
+        value: "password reset"
+      - field: subject
+        comparator: contains
+        value: "reset password"
+      - field: subject
+        comparator: contains
+        value: "password updated"
+      - field: subject
+        comparator: contains
+        value: "password changed"
+      - field: subject
+        comparator: contains
+        value: "verify your identity"
+      - field: subject
+        comparator: contains
+        value: "new sign-in"
+      - field: subject
+        comparator: contains
+        value: "security alert"
+      - field: subject
+        comparator: contains
+        value: "suspicious activity"
+      - field: subject
+        comparator: contains
+        value: "unusual activity"
+    action:
+      add_label: security_alert
+
   # --- News ---
   - description: "News outlets"
     active: true
@@ -154,6 +198,30 @@ rules:
         value: "There's An AI For That"
     action:
       add_label: ai
+
+  # --- Job alert senders (single-job automated mail) ---
+  # Must come before "Social networks" below: linkedin.com's job-alert
+  # senders would otherwise be shadowed by that rule's generic linkedin.com
+  # match (first-match-wins — see rules_v2_engine.first_matching_label).
+  # These count as recruiter_job even though they're automated, not from a
+  # named human recruiter — see rules/actions.yaml's recruiter_job entry
+  # (a short-lived separate "job_digest" category was tried and reverted
+  # 2026-07-05 as unnecessary complexity).
+  - description: "Job alert senders (LinkedIn Job Alerts/Recommendations, Ladders)"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '^jobalerts-noreply@linkedin\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '^jobs-noreply@linkedin\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*theladders\.com$'
+    action:
+      add_label: recruiter_job
 
   # --- Social ---
   - description: "Social networks"
@@ -213,6 +281,30 @@ rules:
       - field: from_url_pattern
         comparator: matches
         value: '@([\w-]+\.)*stayinformednow\.com$'
+      # Added 2026-07-05 from real personal_hub sender-domain analysis after
+      # the inbox-flood incident (see comms-migration-runbook.md) — these
+      # were all falling through to the LLM at ~$0.002+/message.
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*donaldjtrump\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*nrsc\.org$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*housegopmajority\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*rnchq\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*nrccwin\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*vanorden4congress\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*thenrcc\.org$'
     action:
       add_label: political
 
@@ -342,6 +434,10 @@ rules:
       - field: from_url_pattern
         comparator: matches
         value: '@([\w-]+\.)*etrade\.com$'
+      # Added 2026-07-05 from real personal_hub sender-domain analysis.
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*seekingalpha\.com$'
     action:
       add_label: investing
 

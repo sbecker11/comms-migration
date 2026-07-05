@@ -45,11 +45,20 @@ categories:
     human_in_loop: true
     sensitivity: medium
 
+  # recruiter_job: any email that lists a single job (with or without a named
+  # human recruiter) — this includes automated single-job-alert mail (e.g.
+  # LinkedIn Job Alerts/Recommendations) as well as personalized recruiter
+  # outreach. A short-lived "job_digest" category (2026-07-05) tried to split
+  # these out separately, but was reverted the same day: not worth the extra
+  # taxonomy complexity, and job-tracker's recruiting_funnel queue is
+  # label-only/never-archived there anyway (see NEVER_ARCHIVE_CATEGORIES_BY_ACCOUNT
+  # in classifier/actions.py), so extra volume doesn't cost anything.
   recruiter_job:
     trigger_signals:
       - recruiter language
       - job description content
       - scheduling language
+      - single-job alert/recommendation mail from a job board (LinkedIn, Ladders, etc.)
     default_action: label_archive  # labeled + archived; job-tracker's query isn't scoped to in:inbox, so it still finds these
     sub_actions:
       - match_triage

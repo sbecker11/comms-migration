@@ -173,6 +173,90 @@ def test_subject_based_rule_matches_via_real_config() -> None:
     assert match.category == "ai"
 
 
+def test_real_config_flags_password_reset_from_any_sender_as_security_alert() -> None:
+    # Regression test for a real 2026-07-05 miss on recruiting_funnel: an MIT
+    # alumni portal's password-reset/change emails (help@alum.mit.edu — not
+    # one of the sender-specific security_alert rules, which only cover
+    # Google/Microsoft/Apple) fell through to the LLM and got misclassified
+    # as "personal". The generic, sender-agnostic subject-content rule this
+    # added must catch this regardless of which site sent it.
+    engine = RulesEngine()
+
+    updated = engine.classify("help@alum.mit.edu", subject="Infinite Connection: password updated")
+    assert updated is not None
+    assert updated.category == "security_alert"
+    assert updated.default_action == "notify_now"
+
+    reset = engine.classify(
+        "help@alum.mit.edu", subject="Infinite Connection: reset password instructions"
+    )
+    assert reset is not None
+    assert reset.category == "security_alert"
+
+    # And a genuinely unrelated personal subject must NOT be swept in.
+    unrelated = engine.classify("friend@example.com", subject="Hey, want to grab lunch?")
+    assert unrelated is None
+
+
+def test_real_config_flags_linkedin_and_ladders_job_alerts_as_recruiter_job_not_social() -> None:
+    # Regression test for a real 2026-07-05 miss on recruiting_funnel: LinkedIn
+    # Job Alerts/Recommendations mail was shadowed by the generic "Social
+    # networks" linkedin.com rule (first-match-wins), and Ladders mail had no
+    # rule at all and fell through to the LLM inconsistently. A same-day
+    # "job_digest" category was tried to separate these out, then reverted:
+    # recruiter_job covers any single-job alert mail, automated or not.
+    engine = RulesEngine()
+
+    linkedin_alert = engine.classify(
+        "jobalerts-noreply@linkedin.com", subject="Software Engineer - Full-stack at Swiftly, Inc."
+    )
+    assert linkedin_alert is not None
+    assert linkedin_alert.category == "recruiter_job"
+    assert linkedin_alert.default_action == "label_archive"
+
+    linkedin_reco = engine.classify(
+        "jobs-noreply@linkedin.com", subject="Talkiatry is hiring for a Remote role"
+    )
+    assert linkedin_reco is not None
+    assert linkedin_reco.category == "recruiter_job"
+
+    ladders = engine.classify("jobs@my.theladders.com", subject="Top job opportunities you should see ASAP")
+    assert ladders is not None
+    assert ladders.category == "recruiter_job"
+
+    # Genuine LinkedIn social notifications (not job-alert senders) must
+    # still land in "social", unaffected by the new rule.
+    connection_request = engine.classify("messages-noreply@linkedin.com", subject="John Smith wants to connect")
+    assert connection_request is not None
+    assert connection_request.category == "social"
+
+
+def test_real_config_flags_additional_political_and_investing_domains_found_2026_07_05() -> None:
+    # Regression test for domains added after the 2026-07-05 personal_hub
+    # inbox-flood incident's follow-up sender-domain analysis: these were
+    # all falling through to the LLM (real $ cost) despite being frequent,
+    # unambiguous senders. See rules/rules.yaml's political/investing rules.
+    engine = RulesEngine()
+
+    political_senders = [
+        "press@win.donaldjtrump.com",
+        "news@emails.nrsc.org",
+        "team@emails.housegopmajority.com",
+        "info@campaigns.rnchq.com",
+        "updates@emails.nrccwin.com",
+        "campaign@emails.vanorden4congress.com",
+        "news@email.thenrcc.org",
+    ]
+    for sender in political_senders:
+        result = engine.classify(sender, subject="test", body="")
+        assert result is not None, f"{sender} should have matched a rule"
+        assert result.category == "political", f"{sender} -> {result.category}, expected political"
+
+    investing = engine.classify("alerts@seekingalpha.com", subject="test", body="")
+    assert investing is not None
+    assert investing.category == "investing"
+
+
 def test_known_hub_domain_also_matches_subdomain(tmp_path: Path) -> None:
     senders_path = tmp_path / "senders.yaml"
     rules_path = tmp_path / "rules.yaml"

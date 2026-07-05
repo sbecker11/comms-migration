@@ -13,12 +13,25 @@ Does NOT delete the `Category/*` label objects themselves — only removes
 them from messages — so relabeling on the next run reuses the same label
 IDs instead of recreating them.
 
+Safety guard (added 2026-07-05 after a real incident): a reset on
+personal_hub restored ~7,660 messages to the inbox in one shot, because
+those `Category/political`/`Category/church` labels had actually come from
+a one-time legacy-label migration (years of archived mail), not from a
+recent classifier run — this script can't tell the difference, since it
+only sees "message has a Category/* label right now". By default it
+refuses to touch more than `--max-messages` messages without `--force`,
+so a surprise like that gets a chance to be reviewed (via --dry-run) first
+instead of immediately flooding the inbox.
+
 Examples:
     # Safe first look — counts only, nothing is modified.
     python scripts/reset_categorization.py --account personal_hub --dry-run
 
     # Actually remove every Category/* label and restore INBOX.
     python scripts/reset_categorization.py --account personal_hub
+
+    # Bypass the safety guard for a deliberately large reset.
+    python scripts/reset_categorization.py --account personal_hub --force
 """
 
 from __future__ import annotations
@@ -46,6 +59,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Report what would be removed/restored; make no changes",
     )
+    ap.add_argument(
+        "--max-messages",
+        type=int,
+        default=200,
+        help="Refuse to actually reset more than this many messages without --force (default: 200)",
+    )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="Bypass the --max-messages safety guard",
+    )
     args = ap.parse_args(argv)
 
     service = gmail_client.get_gmail_service(args.account)
@@ -57,13 +81,37 @@ def main(argv: list[str] | None = None) -> int:
         print("No Category/* labels found — nothing to reset.")
         return 0
 
-    total_messages = 0
+    # Gather everything first (read-only) so the safety guard below can
+    # check the true total before any message is modified.
+    per_label_ids = {
+        label["name"]: gmail_client.list_message_ids_with_label(service, label["id"])
+        for label in sorted(category_labels, key=lambda l: l["name"])
+    }
+    total_messages = sum(len(ids) for ids in per_label_ids.values())
+
+    verb = "Would remove" if args.dry_run else "Removing"
     for label in sorted(category_labels, key=lambda l: l["name"]):
-        message_ids = gmail_client.list_message_ids_with_label(service, label["id"])
-        total_messages += len(message_ids)
-        verb = "Would remove" if args.dry_run else "Removing"
-        print(f"  {verb} {label['name']:<30} from {len(message_ids)} message(s)")
-        if not args.dry_run and message_ids:
+        print(f"  {verb} {label['name']:<30} from {len(per_label_ids[label['name']])} message(s)")
+
+    action = "Would touch" if args.dry_run else "Touched"
+    print(f"\n{action} {total_messages} message(s) total across {len(category_labels)} label(s).")
+
+    if args.dry_run:
+        print("DRY RUN: no labels removed, nothing restored to inbox.")
+        return 0
+
+    if total_messages > args.max_messages and not args.force:
+        print(
+            f"\nABORTED: this would touch {total_messages} messages, over the safety "
+            f"limit of {args.max_messages}. Re-run with --dry-run to review first, or "
+            "--force if this scale is actually intended (e.g. a real prior classifier "
+            "run, not an old bulk-labeled backlog)."
+        )
+        return 1
+
+    for label in sorted(category_labels, key=lambda l: l["name"]):
+        message_ids = per_label_ids[label["name"]]
+        if message_ids:
             gmail_client.batch_modify(
                 service,
                 message_ids,
@@ -71,12 +119,7 @@ def main(argv: list[str] | None = None) -> int:
                 add_label_ids=["INBOX"],
             )
 
-    action = "Would touch" if args.dry_run else "Touched"
-    print(f"\n{action} {total_messages} message(s) total across {len(category_labels)} label(s).")
-    if args.dry_run:
-        print("DRY RUN: no labels removed, nothing restored to inbox.")
-    else:
-        print("Category/* labels removed and affected messages restored to inbox.")
+    print("Category/* labels removed and affected messages restored to inbox.")
     return 0
 
 

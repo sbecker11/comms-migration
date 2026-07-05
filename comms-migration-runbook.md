@@ -414,10 +414,36 @@ comms-migration/
     run.py                 # orchestrates one classification pass
   scripts/
     run_classifier.py      # CLI entrypoint
+    reset_categorization.py # CLI: undo classifier labels/archiving on one account
     validate_rules.py      # CLI: validate a rules.yaml file standalone
     check_dead_rules.py    # CLI: report likely-dead rules from telemetry
   tests/                   # mocked Gmail/Anthropic, no live calls
 ```
+
+#### Incident notes
+
+- **2026-07-05, personal_hub inbox flood.** A years-old manual label
+  consolidation (`politics`/`church`/etc. legacy Gmail labels → this
+  project's `Category/*` taxonomy, done via a one-off script, not through
+  `run_classifier.py`) left ~7,660 messages carrying `Category/political` or
+  `Category/church` despite having been archived (out of the inbox) for a
+  long time. Running `scripts/reset_categorization.py --account personal_hub`
+  afterward — intending only to undo a recent small test run — instead
+  stripped those labels and restored **all** of them to the inbox in one
+  batch, since the script has no way to distinguish "labeled by a recent
+  classifier run" from "labeled by an unrelated one-time migration months/
+  years ago". Recovery required manually re-archiving the flood and
+  re-running the classifier on the affected mail. Two changes came out of
+  this:
+  - `scripts/run_classifier.py --newer-than` now defaults to `365` (was:
+    unset/unlimited) — pass `--newer-than 0` to disable.
+  - `scripts/reset_categorization.py` now refuses to touch more than
+    `--max-messages` (default `200`) without `--force`, so an unexpectedly
+    large reset gets surfaced before it executes instead of after.
+  - Lesson for future one-off bulk label operations (migrations, backfills,
+    etc.): do them with labels *not* prefixed `Category/*`, or immediately
+    document/isolate the affected message IDs, so `reset_categorization.py`
+    can't later mistake them for classifier output.
 
 Phase 5c (not yet built) would replace manual polling with a real-time
 trigger: FastAPI webhook + Gmail Pub/Sub subscriber, deployed to Cloud Run,

@@ -114,6 +114,7 @@ classifier/                 # Phase 5 — categorization & action layer (built)
 scripts/
   export_senders_cli.py    # CLI wrapper around contacts/export_senders.py
   run_classifier.py        # CLI: classify + act on one mapped Gmail account
+  reset_categorization.py  # CLI: undo classifier labels/archiving on one account
   validate_rules.py        # CLI: schema + contradiction validation for rules.yaml
   check_dead_rules.py      # CLI: report likely-dead rules from accumulated telemetry
   default_contacts_personal.py

@@ -2,6 +2,12 @@
 """CLI: classify inbox mail for one mapped Gmail account and (optionally)
 label/archive it per rules/actions.yaml.
 
+Defaults to only mail from the last 365 days (`--newer-than`, added 2026-07-05
+after a `scripts/reset_categorization.py` run on a mailbox with years of
+legacy-labeled backlog flooded the inbox with ~7,660 old messages that had
+nothing to do with the run at hand — see the runbook's incident notes).
+Pass `--newer-than 0` to process mail of any age.
+
 Examples:
     # Safe first look — nothing is modified, just reports what WOULD happen.
     python scripts/run_classifier.py --account personal_hub --dry-run --limit 25
@@ -9,8 +15,11 @@ Examples:
     # Same, but skip the LLM fallback (rules only, zero API cost).
     python scripts/run_classifier.py --account personal_hub --dry-run --no-llm-fallback --limit 25
 
-    # Actually label + archive per the resolved actions.
+    # Actually label + archive per the resolved actions (last 30 days only).
     python scripts/run_classifier.py --account personal_hub --newer-than 30
+
+    # Process mail of any age (disables the default 365-day cutoff).
+    python scripts/run_classifier.py --account personal_hub --newer-than 0 --limit 25
 """
 
 from __future__ import annotations
@@ -76,7 +85,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--limit", type=int, help="Max messages to process")
     ap.add_argument("--query", default=DEFAULT_QUERY, help=f"Gmail search query (default: {DEFAULT_QUERY!r})")
-    ap.add_argument("--newer-than", type=int, metavar="DAYS")
+    ap.add_argument(
+        "--newer-than",
+        type=int,
+        default=365,
+        metavar="DAYS",
+        help="Only classify mail newer than this many days old (default: 365; pass 0 to disable the filter entirely)",
+    )
     ap.add_argument("--credentials", type=Path)
     ap.add_argument("--token", type=Path)
     ap.add_argument(
