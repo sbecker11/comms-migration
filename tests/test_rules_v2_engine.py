@@ -1,7 +1,9 @@
 """Tests for classifier/rules_v2_engine.py — the Mail.app-style rule
 evaluator, with a focus on `from_url_pattern` (regex against the full
 sender address, added 2026-07-05 to replace the domain-only `from_domain`
-field) and the date fields' Iso8601Utc datatype.
+field), `subject_pattern` (same regex semantics against the subject line,
+added 2026-07-06 for word-boundary-safe subject matching), and the date
+fields' Iso8601Utc datatype.
 """
 
 from __future__ import annotations
@@ -55,6 +57,54 @@ def test_local_part_pattern_not_expressible_with_old_from_domain() -> None:
         "vendor_transactional"
     )
     assert match_rules([rule], MessageFields(from_address="billing@mail.example.com")) is None
+
+
+SUBJECT_WORD_BOUNDARY_RULE = {
+    "description": "AI mentioned in subject (word-boundary)",
+    "active": True,
+    "combinator": "any",
+    "expressions": [{"field": "subject_pattern", "comparator": "matches", "value": r"\bAI\b"}],
+    "action": {"add_label": "ai"},
+}
+
+
+def test_subject_pattern_matches_standalone_word() -> None:
+    category = match_rules(
+        [SUBJECT_WORD_BOUNDARY_RULE], MessageFields(from_address="x@example.com", subject="Weekly AI roundup")
+    )
+    assert category == "ai"
+
+
+def test_subject_pattern_is_case_insensitive() -> None:
+    category = match_rules(
+        [SUBJECT_WORD_BOUNDARY_RULE], MessageFields(from_address="x@example.com", subject="the future of ai")
+    )
+    assert category == "ai"
+
+
+def test_subject_pattern_word_boundary_rejects_substring_matches() -> None:
+    # The whole point of subject_pattern over a plain `subject contains`:
+    # "ai" is a substring of plenty of ordinary words, but \bAI\b must not
+    # match any of them.
+    for subject in ["He said hello", "Please wait in the main lobby", "Your seat is available"]:
+        category = match_rules(
+            [SUBJECT_WORD_BOUNDARY_RULE], MessageFields(from_address="x@example.com", subject=subject)
+        )
+        assert category is None, f"{subject!r} incorrectly matched \\bAI\\b"
+
+
+def test_subject_pattern_does_not_match_comparator_negates() -> None:
+    rule = {
+        "description": "Subject without AI",
+        "active": True,
+        "combinator": "any",
+        "expressions": [{"field": "subject_pattern", "comparator": "does_not_match", "value": r"\bAI\b"}],
+        "action": {"add_label": "spam_unknown"},
+    }
+    assert match_rules([rule], MessageFields(from_address="x@example.com", subject="Weekly newsletter")) == (
+        "spam_unknown"
+    )
+    assert match_rules([rule], MessageFields(from_address="x@example.com", subject="Weekly AI roundup")) is None
 
 
 def test_does_not_match_comparator_negates() -> None:

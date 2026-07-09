@@ -205,7 +205,7 @@ rules:
     active: true                       # like the Active checkbox — disable without deleting
     combinator: any                    # any = OR, all = AND across expressions
     expressions:
-      - field: from_url_pattern        # from | to | cc | subject | body | from_url_pattern | date_sent | date_received
+      - field: from_url_pattern        # from | to | cc | subject | body | from_url_pattern | subject_pattern | date_sent | date_received
         comparator: matches            # contains | does_not_contain | begins_with | ends_with | equals | matches | does_not_match
         value: '@([\w-]+\.)*nytimes\.com$'  # regex; date fields use less_than_days_old / greater_than_days_old + an integer
     action:
@@ -270,14 +270,15 @@ between a `from` expression and a `from_url_pattern` expression at all,
 since it grouped strictly by schema field-name rather than by what
 real-world value each field actually constrains.
 
-But "complete for what it models" has a real asterisk: **`from_url_pattern`'s
-regex (`matches`/`does_not_match`) is not modeled at all** — those
-expressions contribute no constraint to the solve (see
+But "complete for what it models" has a real asterisk: **`from_url_pattern`/
+`subject_pattern`'s regex (`matches`/`does_not_match`) is not modeled at
+all** — those expressions contribute no constraint to the solve (see
 `rules_satisfiability.py`'s docstring, "Scope"). This is the deliberate
 "good-enough" cut for now: Z3 *can* reason about regexes (its `InRe`/`Re.*`
 combinators), but translating Python's `re` syntax into Z3's regex AST is
-real, separate engineering work, and every `from_url_pattern` rule in
-`rules.yaml` today uses one simple idiom (the domain-suffix regex). Getting
+real, separate engineering work, and every pattern-field rule in
+`rules.yaml` today uses one of a couple of simple idioms (the domain-suffix
+regex, or a word-boundary token match). Getting
 to a *fully* complete solution would mean: (a) translating that regex
 vocabulary into Z3's theory, and (b) adding length constraints if we ever
 need them (length is what makes genuinely irreducible 3-or-more-way
@@ -334,6 +335,15 @@ behavior explicitly, since plain string `ends_with` on a bare domain has
 real false-positive risk (`fakenextdoor.com` matching `nextdoor.com`). An
 invalid regex value fails loudly at load time rather than silently
 no-op'ing.
+
+**`subject_pattern`** (2026-07-06) is the same idea as `from_url_pattern`
+but matched against the subject line instead of the sender address — added
+specifically for word-boundary-safe matching that plain `subject contains`
+can't express: `subject contains "AI"` would false-positive on any subject
+with "said", "main", "available", "maintain", etc. (case-insensitive
+substring match), whereas `subject_pattern matches '\bAI\b'` only matches
+"AI" as its own word/acronym. Same `re.search` semantics, same load-time
+regex-compileability check, as `from_url_pattern`.
 
 **`date_sent`/`date_received`** always represent the *message's* dates as
 `Iso8601Utc` (`classifier/rules_v2_engine.py`) — an ISO-8601 string with an

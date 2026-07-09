@@ -29,10 +29,10 @@ match any message, and `unsat_core()` gives back the minimal subset of
 expressions actually responsible — not just "somewhere in this rule."
 
 Scope (see README for the full "complete vs. good-enough" comparison):
-`from_url_pattern`'s regex (`matches`/`does_not_match`) is NOT translated
-into Z3's regex theory yet — those expressions are simply not modeled
-(contribute no constraint), so conflicts purely between two regexes, or a
-regex and a string/date expression, still go undetected, exactly like
+`from_url_pattern`/`subject_pattern`'s regex (`matches`/`does_not_match`) is
+NOT translated into Z3's regex theory yet — those expressions are simply not
+modeled (contribute no constraint), so conflicts purely between two regexes,
+or a regex and a string/date expression, still go undetected, exactly like
 before this module existed. Everything else — any combination of
 `contains`/`does_not_contain`/`begins_with`/`ends_with`/`equals` across any
 number of expressions on `from`/`to`/`cc`/`subject`/`body`, plus
@@ -50,16 +50,21 @@ import z3
 _STRING_FIELDS = {"from", "to", "cc", "subject", "body"}
 _DATE_FIELDS = {"date_sent", "date_received"}
 
+# Pattern fields aren't modeled in Z3's theory (see Scope above), but each
+# constrains the exact same real-world value as one of the plain string
+# fields — unify them onto that field's variable so a contradiction between
+# e.g. a `subject` expression and a `subject_pattern` expression on the same
+# rule is still caught, with no field-name special-casing beyond this map (a
+# gap the old pairwise checker had, since it grouped strictly by the
+# schema's `field` string).
+_PATTERN_FIELD_SEMANTICS = {
+    "from_url_pattern": "from",
+    "subject_pattern": "subject",
+}
+
 
 def _semantic_field(field: str) -> str:
-    """`from_url_pattern` constrains the exact same real-world value as
-    `from` (the sender address) — model both onto ONE Z3 variable so a
-    contradiction between a `from` expression and a `from_url_pattern`
-    expression on the same rule is caught automatically, with no
-    field-name special-casing (a gap the old pairwise checker had, since
-    it grouped strictly by the schema's `field` string).
-    """
-    return "from" if field == "from_url_pattern" else field
+    return _PATTERN_FIELD_SEMANTICS.get(field, field)
 
 
 def _build_solver(
@@ -89,12 +94,12 @@ def _build_solver(
         value = expr.get("value")
         constraint: z3.BoolRef | None = None
 
-        if field == "from_url_pattern":
+        if field in _PATTERN_FIELD_SEMANTICS:
             # Not modeled — see module docstring's Scope section. Its
-            # variable is still unified with `from`'s (via string_var ->
-            # _semantic_field), so this expression contributes nothing,
-            # but OTHER from/from_url_pattern expressions on this rule are
-            # still checked against each other correctly.
+            # variable is still unified with its semantic field's (via
+            # string_var -> _semantic_field), so this expression contributes
+            # nothing, but OTHER expressions on that same semantic field in
+            # this rule are still checked against each other correctly.
             continue
         if field in _STRING_FIELDS:
             var = string_var(field)

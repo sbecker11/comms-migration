@@ -38,7 +38,7 @@
           "type": "string",
           "enum": [
             "from", "to", "cc", "subject", "body",
-            "from_url_pattern",
+            "from_url_pattern", "subject_pattern",
             "date_sent", "date_received"
           ]
         },
@@ -71,6 +71,20 @@
           "comment": "from_url_pattern — regex (re.search) against the FULL sender address, not just the domain. Regex compileability of `value` is checked separately in classifier/rules_schema_validate.py, since JSON Schema alone can't validate that.",
           "if": {
             "properties": { "field": { "const": "from_url_pattern" } }
+          },
+          "then": {
+            "properties": {
+              "comparator": {
+                "enum": ["matches", "does_not_match"]
+              },
+              "value": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "comment": "subject_pattern — regex (re.search) against the subject line. Added 2026-07-06 for word-boundary-safe matching (e.g. '\\bAI\\b') that plain `subject contains` can't express without false-positiving on words like 'said'/'main'/'available' that merely contain the substring 'ai'. Regex compileability of `value` is checked separately in classifier/rules_schema_validate.py, same as from_url_pattern.",
+          "if": {
+            "properties": { "field": { "const": "subject_pattern" } }
           },
           "then": {
             "properties": {

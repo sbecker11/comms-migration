@@ -29,8 +29,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RULES_PATH = REPO_ROOT / "rules" / "rules.yaml"
 
 _STRING_FIELDS = {"from", "to", "cc", "subject", "body"}
-_PATTERN_FIELDS = {"from_url_pattern"}
+_PATTERN_FIELDS = {"from_url_pattern", "subject_pattern"}
 _DATE_FIELDS = {"date_sent", "date_received"}
+
+# Which MessageFields attribute each pattern field's regex actually runs
+# against. from_url_pattern is named for what it matches (a URL/address-like
+# string), not a MessageFields attribute 1:1, so this can't be a simple
+# getattr(msg, field) — same reason subject_pattern needs its own entry
+# even though its name IS the attribute name.
+_PATTERN_FIELD_SOURCE = {
+    "from_url_pattern": "from_address",
+    "subject_pattern": "subject",
+}
 
 # A single canonical datatype for every date this engine touches: an
 # ISO-8601 string with an explicit UTC offset (either literal "Z" or
@@ -189,7 +199,8 @@ def _expression_matches(expr: dict[str, Any], msg: MessageFields) -> bool:
     value = expr["value"]
 
     if field in _PATTERN_FIELDS:
-        return _pattern_compare(comparator, msg.from_address, value)
+        source_attr = _PATTERN_FIELD_SOURCE[field]
+        return _pattern_compare(comparator, getattr(msg, source_attr), value)
     if field in _STRING_FIELDS:
         return _string_compare(comparator, _string_field_value(msg, field), value)
     if field in _DATE_FIELDS:

@@ -58,6 +58,46 @@ rules:
     assert any("not a valid regex" in p for p in problems)
 
 
+def test_rejects_invalid_regex_in_subject_pattern(tmp_path) -> None:
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        r"""
+rules:
+  - description: "bad subject regex"
+    active: true
+    combinator: any
+    expressions:
+      - field: subject_pattern
+        comparator: matches
+        value: "AI([unclosed"
+    action:
+      add_label: news
+"""
+    )
+    problems = validate_rules_file(bad)
+    assert any("not a valid regex" in p for p in problems)
+
+
+def test_accepts_valid_subject_pattern_rule(tmp_path) -> None:
+    ok = tmp_path / "ok.yaml"
+    ok.write_text(
+        r"""
+rules:
+  - description: "AI word boundary"
+    active: true
+    combinator: any
+    expressions:
+      - field: subject_pattern
+        comparator: matches
+        value: '\bAI\b'
+    action:
+      add_label: news
+"""
+    )
+    problems = validate_rules_file(ok)
+    assert problems == []
+
+
 def test_rejects_unknown_field_name(tmp_path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text(

@@ -43,16 +43,21 @@
 #   String fields      — from, to, cc, subject, body
 #     Comparators: contains | does_not_contain | begins_with | ends_with | equals
 #     (case-insensitive; `body` == Mail.app's "Message content")
-#   Pattern field       — from_url_pattern  (regex, matched with re.search
+#   Pattern fields      — from_url_pattern (regex, matched with re.search
 #     against the FULL sender address — not domain-only, so it can target
 #     local-part patterns too, e.g. 'noreply@' or a specific subdomain
-#     structure, not just "ends with this registered domain")
+#     structure, not just "ends with this registered domain"), and
+#     subject_pattern (same re.search semantics, but against the subject
+#     line — added 2026-07-06 for word-boundary-safe matching a plain
+#     `subject contains` comparator can't express, e.g. '\bAI\b' matching
+#     "AI" as its own word/acronym without false-positiving on "said",
+#     "main", "available", "maintain", etc.)
 #     Comparators: matches | does_not_match   (value: a regex pattern string)
 #     Since this is `re.search`, not `re.fullmatch`, an unanchored pattern
-#     like 'nytimes\.com' would match ANYWHERE in the address — use '^'/'$'
-#     to anchor when that matters. The domain-suffix rules below use the
-#     idiom '@([\w-]+\.)*DOMAIN$' (matches DOMAIN or any subdomain of it,
-#     anchored at the end of the address, right after the lone '@') to
+#     like 'nytimes\.com' would match ANYWHERE in the address/subject — use
+#     '^'/'$' to anchor when that matters. The domain-suffix rules below use
+#     the idiom '@([\w-]+\.)*DOMAIN$' (matches DOMAIN or any subdomain of
+#     it, anchored at the end of the address, right after the lone '@') to
 #     replicate the old dot-boundary-safe behavior explicitly rather than
 #     silently baking it into a comparator.
 #     A malformed regex value fails loudly at load time (see
@@ -154,6 +159,27 @@ rules:
     action:
       add_label: security_alert
 
+  # --- Active client ---
+  # Waystar's Workday-hosted candidate-communications preference email — an
+  # active-application signal from a named employer, not a generic job-board
+  # alert, per user request (2026-07-06). from is the exact sender address
+  # (myworkday.com is a shared multi-tenant ATS domain — matching that alone
+  # would catch every OTHER company's Workday mail too), AND'd with the
+  # subject so this stays scoped to this one email, not anything else
+  # Waystar's ATS might send.
+  - description: "Waystar — keep receiving email preference confirmation"
+    active: true
+    combinator: all
+    expressions:
+      - field: from
+        comparator: equals
+        value: waystar@myworkday.com
+      - field: subject
+        comparator: contains
+        value: "Keep Receiving Our Email"
+    action:
+      add_label: active_client
+
   # --- News ---
   - description: "News outlets"
     active: true
@@ -222,6 +248,140 @@ rules:
         value: '@([\w-]+\.)*theladders\.com$'
     action:
       add_label: recruiter_job
+
+  # LinkedIn InMail (direct recruiter outreach, or a reply notification for
+  # one) — distinct from the job-BOARD alert senders above. Added
+  # 2026-07-06, originally scoped to subject contains "New job opportunity"
+  # after that exact InMail template was falling into Social networks
+  # below via linkedin.com's generic domain match; broadened the same day
+  # after a second InMail ("Sr. AI Full Stack Engineer in Des Moines, IA
+  # (Onsite)") used a different subject convention entirely, to match on
+  # sender address alone (inmail-hit-reply@ / hit-reply@linkedin.com are
+  # LinkedIn's dedicated InMail/InMail-reply-notification addresses).
+  #
+  # NARROWED again the same day: sender-alone turned out to be too broad
+  # once more real InMail traffic came in — "Come join our network of
+  # consultants @ Equal Experts!" and generic "Message replied: <no job
+  # info>" notifications from these SAME addresses are network/social
+  # outreach, not job opportunities, and the user asked those stay in
+  # Social. So each rule below now requires the InMail sender AND a
+  # subject phrase that actually signals job content. The combined regex
+  # '^(inmail-)?hit-reply@linkedin\.com$' matches both dedicated InMail
+  # addresses in one expression. Must come before "Social networks" below
+  # for first-match-wins (see rules_v2_engine.first_matching_label) —
+  # anything from these addresses NOT matching one of these subject
+  # phrases correctly falls through to Social networks.
+  - description: "LinkedIn InMail — new job opportunity"
+    active: true
+    combinator: all
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '^(inmail-)?hit-reply@linkedin\.com$'
+      - field: subject
+        comparator: contains
+        value: "New job opportunity"
+    action:
+      add_label: recruiter_job
+
+  - description: "LinkedIn InMail — Hiring for ..."
+    active: true
+    combinator: all
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '^(inmail-)?hit-reply@linkedin\.com$'
+      - field: subject
+        comparator: contains
+        value: "Hiring for"
+    action:
+      add_label: recruiter_job
+
+  - description: "LinkedIn InMail — Software Engineer Opportunity"
+    active: true
+    combinator: all
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '^(inmail-)?hit-reply@linkedin\.com$'
+      - field: subject
+        comparator: contains
+        value: "Software Engineer Opportunity"
+    action:
+      add_label: recruiter_job
+
+  # Onsite/Remote/Hybrid work-arrangement tags — same convention job boards
+  # use in title/subject lines (e.g. "Sr. AI Full Stack Engineer in Des
+  # Moines, IA (Onsite)" from 2026-07-06's CLAUDE.md onsite-dealbreaker
+  # fix). Originally two separate rules requiring the literal parenthesized
+  # "(Onsite)"/"(Remote)" strings; broadened the same day (still 2026-07-06)
+  # after "Machine Learning Engineer - 6-12+ months - Remote" — no
+  # parens — fell through to Social networks instead. Word-boundary match
+  # so it still requires a standalone tag, not e.g. "remotely". Excludes
+  # "Message replied:" notifications — the user explicitly asked those stay
+  # in Social regardless of what job-ish text the replied-to message
+  # contains (e.g. "Message replied: 100% REMOTE Full-Stack Engineer @
+  # CVS"); only a genuine new InMail (no "Message replied:" wrapper) with
+  # this tag counts.
+  - description: "LinkedIn InMail — Onsite/Remote/Hybrid tagged role"
+    active: true
+    combinator: all
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '^(inmail-)?hit-reply@linkedin\.com$'
+      - field: subject_pattern
+        comparator: matches
+        value: '\b(Onsite|Remote|Hybrid)\b'
+      - field: subject
+        comparator: does_not_contain
+        value: "Message replied"
+    action:
+      add_label: recruiter_job
+
+  # LinkedIn connection-invitation notifications (invitations@linkedin.com)
+  # — a different sender/purpose than the InMail addresses above. Scoped
+  # to the exact "I want to connect" template per user request
+  # (2026-07-06): unlike the near-identical "I've sent you a connection
+  # request" template (see docs/CATEGORY_HANDLER note — deliberately NOT
+  # auto-routed, since that one covers routine non-recruiter connections
+  # too and the user asked for manual re-routing instead; see
+  # scripts/recategorize_message.py), "I want to connect" was specifically
+  # called out as recruiter-signal.
+  - description: "LinkedIn — I want to connect (invitations)"
+    active: true
+    combinator: all
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '^invitations@linkedin\.com$'
+      - field: subject
+        comparator: contains
+        value: "I want to connect"
+    action:
+      add_label: recruiter_job
+
+  # LinkedIn's generic "X just messaged you" digest (messaging-digest-noreply@)
+  # doesn't carry the sender's email, only their first name in the subject —
+  # unlike the dedicated InMail addresses above, this digest fires for ANY
+  # LinkedIn connection, so it can't be scoped by sender alone. Scoped to
+  # "Andrew" specifically per user request (2026-07-06): Andrew Case is a
+  # known, actively-communicating contact who should be treated like
+  # active_client, not generic Social networks. Risk: another LinkedIn
+  # connection literally named Andrew would also match — accepted for now
+  # given no other identifying signal is available in this digest format.
+  - description: "LinkedIn message digest — Andrew (Case), active contact"
+    active: true
+    combinator: all
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '^messaging-digest-noreply@linkedin\.com$'
+      - field: subject
+        comparator: contains
+        value: "Andrew"
+    action:
+      add_label: active_client
 
   # --- Social ---
   - description: "Social networks"
@@ -337,6 +497,23 @@ rules:
       - field: from
         comparator: equals
         value: noreply@anthropic.com
+      # Added 2026-07-06 (2nd pass): dedicated AI newsletters found split
+      # inconsistently across ai/news/spam_unknown by the LLM fallback
+      # before these existed — the "There's an AI for that" rule above only
+      # matched one specific subject template, missing its other sends
+      # (e.g. "🦾 AI Turns Your Walk Into a Sprint").
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*theresanaiforthat\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*alphasignal\.ai$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*ollama\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*augmentcode\.com$'
     action:
       add_label: ai
 
@@ -348,6 +525,23 @@ rules:
       - field: from_url_pattern
         comparator: matches
         value: '@([\w-]+\.)*churchofjesuschrist\.org$'
+    action:
+      add_label: church
+
+  # FamilySearch (familysearch.org) and MyHeritage Discovery are genealogy/
+  # family-history services — routed to church rather than social/spam_unknown
+  # per user request (2026-07-06), since family history is treated as part of
+  # this category alongside ward/stake communications.
+  - description: "Family history (FamilySearch / MyHeritage)"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*familysearch\.org$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*myheritage\.com$'
     action:
       add_label: church
 
@@ -365,6 +559,50 @@ rules:
       - field: from_url_pattern
         comparator: matches
         value: '@([\w-]+\.)*ziprecruiter\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*jobhat\.com$' # added 2026-07-06: "New job openings posted near you!"
+      # Added 2026-07-06 (2nd pass): recurring job-board/staffing-agency
+      # domains found repeatedly falling through to the (paid) LLM fallback
+      # or getting mislabeled by the AI-subject fallback rule below when a
+      # job title happened to mention "AI" (e.g. diverselynx.com's "RE: ...
+      # Full stack GenAI/Agentic AI" recruiter thread).
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*bebee\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*energyjobline\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*roberthalf\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*job\-tree\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*lensa\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*jobot\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*jobs2web\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*obrajobs\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*diverselynx\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*sysmind\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*msrtechnologies\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*navasoftware\.com$'
     action:
       add_label: recruiter_job
 
@@ -417,6 +655,81 @@ rules:
     action:
       add_label: billing
 
+  # Xoom (PayPal's money-transfer service) transaction notices, per user
+  # request (2026-07-06) — scoped to these 5 specific subjects rather than
+  # adding xoom.com to the generic billing domain list above, since Xoom's
+  # "Action Needed - Your Transaction ... Has Been Cancelled" emails are a
+  # different, more urgent case the user did NOT ask to reroute (currently
+  # resolved by the LLM fallback, left as-is). Each is its own rule (AND of
+  # from + one exact subject) rather than one OR'd rule, since the schema's
+  # combinator is flat — an "any" list here would drop the from_url_pattern
+  # sender scoping these generic-sounding subjects ("Transaction on hold")
+  # need to avoid catching unrelated senders.
+  - description: "Xoom: Update on Transaction"
+    active: true
+    combinator: all
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*xoom\.com$'
+      - field: subject
+        comparator: contains
+        value: "Update on Transaction"
+    action:
+      add_label: billing
+
+  - description: "Xoom: Transaction on hold"
+    active: true
+    combinator: all
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*xoom\.com$'
+      - field: subject
+        comparator: contains
+        value: "Transaction on hold"
+    action:
+      add_label: billing
+
+  - description: "Xoom: transaction receipt"
+    active: true
+    combinator: all
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*xoom\.com$'
+      - field: subject
+        comparator: contains
+        value: "Xoom transaction receipt"
+    action:
+      add_label: billing
+
+  - description: "Xoom: receipt Transaction"
+    active: true
+    combinator: all
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*xoom\.com$'
+      - field: subject
+        comparator: contains
+        value: "receipt Transaction"
+    action:
+      add_label: billing
+
+  - description: "Xoom: Welcome"
+    active: true
+    combinator: all
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*xoom\.com$'
+      - field: subject
+        comparator: contains
+        value: "Welcome to Xoom"
+    action:
+      add_label: billing
+
   # --- Investing ---
   - description: "Brokerage / investing statements"
     active: true
@@ -457,6 +770,117 @@ rules:
         value: '@([\w-]+\.)*statefarm\.com$'
     action:
       add_label: insurance
+
+  # --- Medical ---
+  # Added 2026-07-06 per user request: "subject contains Appointment AND
+  # body [is from] a medical office or pharmacy" -> Category/medical.
+  # Scoped by sender domain (the practice-management/reminder platforms
+  # real medical/dental offices in this mailbox actually use — AdvancedMD,
+  # RemindMeMD, Promptly, PromptHealth, plus a directly-owned dental
+  # practice domain) rather than generic body-text keywords: real spam in
+  # this mailbox already uses "APPOINTMENT" in the subject line to look
+  # legitimate (e.g. "URGENT: APPOINTMENT for Shawn Becker" from a mass
+  # survey sender), so a loose body match risks routing that spam here
+  # too. The one body-based condition below ("pharmacy") is specific
+  # enough on its own not to need the AND with subject.
+  #
+  # Broadened same day (still 2026-07-06) after the user separately named
+  # "Dry Creek Therapy" (uses webpt.com) and "Canyon Crest Dental" (uses
+  # localmed.com for scheduling and flexmail.dental for payment receipts)
+  # as medical services that should route here — but their real mail
+  # (COVID-19 announcements, "Don't forget about us!", payment receipts)
+  # doesn't always say "Appointment" in the subject. Dropped the subject
+  # condition entirely for this whole domain list: every domain here is a
+  # single-purpose medical/dental practice-management platform (never
+  # used for anything else), so a bare domain match carries no
+  # false-positive risk the way a generic body/subject keyword would.
+  - description: "Medical/dental practice platforms (any message)"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*(advancedmd|remindmemd|promptlybyfph|prompthealth|mycanyoncrestdental|webpt|localmed)\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*flexmail\.dental$'
+    action:
+      add_label: medical
+
+  - description: "Pharmacy notices (body mentions pharmacy)"
+    active: true
+    combinator: all
+    expressions:
+      - field: subject
+        comparator: contains
+        value: "Appointment"
+      - field: body
+        comparator: contains
+        value: "pharmacy"
+    action:
+      add_label: medical
+
+  # --- Hobby ---
+  # New category added 2026-07-06 per user request: "spam with subject
+  # that includes 'hobby' or 'kitlinx' reroute to new category hobby".
+  # Scoped by sender domain rather than a bare subject-contains-"hobby"
+  # match: real mail in this mailbox uses the word "hobby" in unrelated
+  # contexts too (e.g. a historyfacts.com trivia newsletter — "George
+  # Washington's surprising hobby" — and a Quizlet marketing email —
+  # "New year, new hobby?"), so a loose keyword match would misroute
+  # those. Each domain below is a dedicated hobby/model-kit retailer:
+  # newtype.us and ak-interactive.com sell hobby paint/model kits;
+  # smartcart.com sends the "Kitlinx" model-kit newsletter; the
+  # hobbylinc/mrshobby patterns are unanchored substring matches against
+  # the full from address to catch subaddressed/forwarded sender formats
+  # (e.g. "noreply=hobbylinc.com@vrmailer3.com", "mrshobby@<id>.mailchimpapp.com").
+  - description: "Hobby / model-kit retailers"
+    active: true
+    combinator: any
+    expressions:
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*newtype\.us$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*ak-interactive\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*smartcart\.com$'
+      - field: from_url_pattern
+        comparator: matches
+        value: 'hobbylinc'
+      - field: from_url_pattern
+        comparator: matches
+        value: 'mrshobby'
+    action:
+      add_label: hobby
+
+  # --- AI (subject fallback) ---
+  # Broader than "There's an AI for that" and "AI product/tool newsletters"
+  # above: catches any OTHER mail that mentions "AI" as its own word/acronym
+  # in the subject (e.g. a general AI-news/tools newsletter not from one of
+  # the specific vendor domains already listed). Deliberately placed at the
+  # very END of the rule list, after every job/recruiter/hobby/medical/
+  # billing/etc. rule above — a plain `subject contains "AI"` would
+  # false-positive on "said"/"main"/"available"/"maintain" (word-boundary
+  # regex via subject_pattern avoids that), but even word-boundary-safe, a
+  # LOT of real recruiter/job-alert mail legitimately has "AI" as a word in
+  # the subject too (e.g. "AI Engineer", "GenAI", job titles like "Sr. AI
+  # Full Stack Engineer") — first-match-wins means those must be caught by
+  # the more specific recruiter_job rules earlier in this file, or this
+  # rule would mislabel real job leads as generic AI newsletters. Only
+  # mail that reaches all the way down here without matching anything more
+  # specific lands on `ai`.
+  - description: "AI mentioned in subject (word-boundary, fallback)"
+    active: true
+    combinator: any
+    expressions:
+      - field: subject_pattern
+        comparator: matches
+        value: '\bAI\b'
+    action:
+      add_label: ai
 
   # --- Financial / admin ---
   - description: "Banks / tax / financial admin"

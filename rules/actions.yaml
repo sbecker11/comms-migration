@@ -38,6 +38,16 @@ categories:
   active_client:
     trigger_signals:
       - known client domain or number
+      # Per user decision (2026-07-06): a recruiter-appointment email from a
+      # hiring client you're ALREADY engaged with (e.g. an interview
+      # scheduling note, an ATS "keep receiving email" preference
+      # confirmation like the Waystar rule below) is active_client, not
+      # recruiter_job — recruiter_job is for job-board alerts and cold
+      # outreach about a NEW opportunity, not ongoing communication about
+      # one you're already pursuing. No concrete rule exists yet beyond the
+      # Waystar example (see rules/rules.yaml) since no other named hiring
+      # client has sent this kind of mail yet; add a scoped from/subject
+      # rule here (mirroring the Waystar one) the next time one does.
     default_action: notify_now
     sub_actions:
       - draft_reply
@@ -59,6 +69,9 @@ categories:
       - job description content
       - scheduling language
       - single-job alert/recommendation mail from a job board (LinkedIn, Ladders, etc.)
+      # NOT this category: appointment/scheduling mail from a hiring client
+      # you're already engaged with — see active_client's trigger_signals
+      # above for that distinction (2026-07-06 decision).
     default_action: label_archive  # labeled + archived; job-tracker's query isn't scoped to in:inbox, so it still finds these
     sub_actions:
       - match_triage
@@ -109,6 +122,20 @@ categories:
       - business liability insurance (professional)
     default_action: flag
     target_hub: split  # health/auto/home -> personal; Spexture liability -> professional
+    human_in_loop: true
+    sensitivity: high
+
+  # Added 2026-07-06 per user request: doctor/dentist/pharmacy appointment
+  # notices. flag (not label_archive) since missing a medical appointment
+  # has real consequences — stays visible in the inbox like insurance,
+  # rather than being auto-archived like the routine financial categories.
+  medical:
+    trigger_signals:
+      - doctor/dentist appointment reminders (practice-management platforms
+        like AdvancedMD, RemindMeMD, Promptly, PromptHealth)
+      - pharmacy notices
+    default_action: flag
+    target_hub: personal
     human_in_loop: true
     sensitivity: high
 
@@ -173,6 +200,18 @@ categories:
   church:
     trigger_signals:
       - ward/stake communications
+    default_action: label_archive
+    target_hub: personal
+    human_in_loop: false
+    sensitivity: low
+
+  # Added 2026-07-06 per user request: hobby/model-kit retailer promo mail
+  # (Mr. Hobby / Gaia paints, Kitlinx newsletters, etc.) — was previously
+  # falling into spam_unknown. Routine low-stakes bulk mail, same tier as
+  # social/news.
+  hobby:
+    trigger_signals:
+      - hobby/model-kit retailer newsletters (paints, kits, tools)
     default_action: label_archive
     target_hub: personal
     human_in_loop: false

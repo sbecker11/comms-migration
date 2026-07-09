@@ -113,6 +113,39 @@ def test_from_url_pattern_regex_not_modeled_does_not_false_positive() -> None:
     assert find_unsatisfiable_core(rule) == []
 
 
+def test_cross_field_name_unification_subject_and_subject_pattern() -> None:
+    """subject and subject_pattern constrain the identical real-world value
+    (the subject line) — a contradiction between a `subject` expression and
+    a `subject_pattern`-adjacent `subject` expression must be caught even
+    though they don't share a literal schema field-name grouping key.
+    """
+    rule = _rule(
+        "all",
+        [
+            {"field": "subject", "comparator": "equals", "value": "hello"},
+            {"field": "subject", "comparator": "begins_with", "value": "goodbye"},
+        ],
+    )
+    core = find_unsatisfiable_core(rule)
+    assert len(core) == 2
+
+
+def test_subject_pattern_regex_not_modeled_does_not_false_positive() -> None:
+    """subject_pattern's regex isn't translated into Z3's regex theory (see
+    module docstring's Scope) — a rule relying purely on it plus other
+    subject_pattern/regex expressions should never be flagged (correctly
+    conservative: no false positives from the unmodeled part).
+    """
+    rule = _rule(
+        "all",
+        [
+            {"field": "subject_pattern", "comparator": "matches", "value": r"\bAI\b"},
+            {"field": "subject_pattern", "comparator": "does_not_match", "value": r"\bAI\b"},
+        ],
+    )
+    assert find_unsatisfiable_core(rule) == []
+
+
 def test_date_range_conflict_still_detected() -> None:
     rule = _rule(
         "all",

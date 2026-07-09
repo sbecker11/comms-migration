@@ -89,9 +89,9 @@ def validate_rules_file(
       2. Every `action.add_label` is a key in actions.yaml's `categories:`.
       3. No duplicate rule `description` values (each should be a unique,
          human-referenceable name, mirroring Mail.app's rule list).
-      4. Every `from_url_pattern` expression's `value` compiles as a regex
-         (the schema can only check it's a non-empty string, not that
-         `re.compile` accepts it).
+      4. Every `from_url_pattern`/`subject_pattern` expression's `value`
+         compiles as a regex (the schema can only check it's a non-empty
+         string, not that `re.compile` accepts it).
       5. No `combinator: all` rule has jointly-unsatisfiable expressions,
          decided via Z3 (see `_find_unsatisfiable_expressions` and
          `classifier/rules_satisfiability.py`) — a rule that can
@@ -122,13 +122,14 @@ def validate_rules_file(
         descriptions_seen[desc] = descriptions_seen.get(desc, 0) + 1
 
         for j, expr in enumerate(rule.get("expressions", [])):
-            if expr.get("field") == "from_url_pattern":
+            field = expr.get("field")
+            if field in ("from_url_pattern", "subject_pattern"):
                 try:
                     re.compile(expr.get("value", ""))
                 except re.error as exc:
                     problems.append(
                         f"rules[{i}].expressions[{j}] ('{rule.get('description')}'): "
-                        f"from_url_pattern value is not a valid regex: {exc}"
+                        f"{field} value is not a valid regex: {exc}"
                     )
 
         problems.extend(_find_unsatisfiable_expressions(rule))
