@@ -5,7 +5,7 @@ Browse and edit `contacts/Contacts.yaml` — extracted from macOS Contacts, used
 ## Setup
 
 ```bash
-cd /Users/sbecker11/workspace-comms/comms-migration
+cd /Users/sbecker11/workspace-recruiting-automation/comms-migration
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

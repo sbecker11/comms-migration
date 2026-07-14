@@ -423,30 +423,53 @@ they don't need separate registration.
 **Always dry-run a new account first.** `--dry-run` reports exactly what
 would be labeled/archived without calling any mutating Gmail API.
 
-#### Re-authenticating when a login expires (expect this ~weekly)
+#### Re-authenticating when a login expires (should be rare now — see below)
 
-This OAuth app is in Google's **"Testing" publishing status** (unverified —
-the "Google hasn't verified this app" screen you click through on every
-login). Google hard-expires refresh tokens issued to Testing-status apps
-**after 7 days, regardless of use**. This isn't a bug — every account
-authenticated against this app (`recruiting_funnel`, `personal_hub`, or any
-future one) will need to be re-authenticated on this cadence until/unless
-the app is moved to "In production" status.
+**Status as of 2026-07-13: the OAuth app backing this classifier
+(`job-tracker-desktop`, Google Cloud project `job-tracker-500901` — the same
+client the sibling `job-tracker` repo uses, just issuing separate
+account/scope tokens here) is published "In production."** It was
+previously in Google's "Testing" publishing status, which hard-expires
+refresh tokens after 7 days regardless of use — that was the actual cause
+of the recurring ~weekly re-auth prompts, not anything specific to Gmail's
+`gmail.modify` scope. Moving to "In production" removed that 7-day cap;
+this did **not** require Google's full verification process (a separate,
+optional step you can safely ignore for a personal 2-account tool like
+this one, even though the "submit for verification" banner appears —
+publishing and verification are independent).
 
-**No manual prep needed.** When a cached token has expired, the next
-`run_classifier.py` invocation will print something like:
+All 5 token grants across this repo and `job-tracker` were force-refreshed
+under the new production policy on 2026-07-13, so both should be good for a
+long time now:
+
+| Repo | Account | Scope | Token file |
+|---|---|---|---|
+| comms-migration (this repo) | `recruiting_funnel` | `gmail.modify` | `~/.config/comms-classifier/recruiting_funnel/token.json` |
+| comms-migration (this repo) | `personal_hub` | `gmail.modify` | `~/.config/comms-classifier/personal_hub/token.json` |
+| job-tracker | `recruiting_funnel` (default) | `gmail.readonly` | `~/.config/job-tracker/token.json` |
+| job-tracker | `recruiting_funnel` (triage) | `gmail.modify` | `~/.config/job-tracker/token_modify.json` |
+| job-tracker | `personal_hub` | `gmail.readonly` | `~/.config/job-tracker/personal_hub/token.json` |
+
+Pre-production tokens were backed up to
+`~/tmp/oauth-tokens-backup-20260713-182409/` before being replaced, in case
+anything ever needs cross-checking.
+
+**If the old weekly-expiry symptom ever comes back**, don't assume it's
+routine — check Google Cloud Console → APIs & Services → OAuth consent
+screen ("Google Auth Platform") → **Audience** tab → **Publishing status**
+first; it likely means the app regressed to "Testing" or a new, different
+OAuth client got created. Otherwise, when a token genuinely does need a
+fresh login, the next `run_classifier.py` invocation handles it
+automatically — no need to delete `token.json` by hand:
 
 ```
 Cached Gmail token for 'personal_hub' is no longer valid (...). Re-opening
-browser for a fresh login — this is expected roughly weekly while this app
-is in Google's 'Testing' publishing status ...
+browser for a fresh login ...
 ```
 
 and a browser window opens automatically — same as your very first consent
 for that account. Sign in as the **same** Gmail account named in the
-message, click through the "unverified app" warning as before, approve
-access, and the command continues. You don't need to delete `token.json`
-by hand; the code detects the failed refresh and re-opens the login flow.
+message, approve access, and the command continues.
 
 ---
 
@@ -481,3 +504,8 @@ This repo is the source of truth for *how mail gets there* (`routing-inventory.m
 If a change affects both sides (e.g. a new forwarding source, or a new account
 feeding the recruiting funnel), update `routing-inventory.md` here first, then
 confirm `job-tracker`'s Gmail reader still points at the right inbox.
+
+A third sibling, [`recruiting-automation`](https://github.com/sbecker11/recruiting-automation),
+owns neither routing nor processing — it's the `launchd`-scheduled wrapper
+that runs this repo's classifier and `job-tracker`'s pipeline together
+hourly, unattended, with its own halt/resume safety net.
