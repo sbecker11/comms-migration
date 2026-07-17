@@ -387,7 +387,13 @@ even if you've already authorized job-tracker against
 
 ```bash
 # 1. Anthropic key for the LLM fallback
-cp .env.example .env   # then fill in ANTHROPIC_API_KEY
+# Prefer the shared workspace key at
+#   ~/workspace-recruiting-automation/.env
+# (single copy used by both this repo and job-tracker). Only copy + set a
+# local .env if you want this repo to override that key — leave
+# ANTHROPIC_API_KEY commented out in .env.example / local .env so an empty
+# local entry doesn't block the shared-file fallback (see classifier/__init__.py).
+# cp .env.example .env   # optional local override only
 
 # 2. Per account: download an OAuth Desktop client (Google Cloud Console)
 #    for that Google account, then place/point at it. The same OAuth

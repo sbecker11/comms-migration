@@ -183,10 +183,19 @@ def classify_message(
     system_prompt = _build_system_prompt(categories)
     user_prompt = _build_user_prompt(from_address=from_address, subject=subject, body=body)
 
+    max_tokens = 512
+    est_in = max(1, (len(system_prompt) + len(user_prompt) + 3) // 4)
+    est_out = max(64, min(max_tokens, max_tokens // 4))
+    pred = _cost_usd(model, est_in, est_out)
+    print(
+        f"    [llm classify] pred ~${pred:.4f} (est. {est_in} in / ~{est_out} out)",
+        flush=True,
+    )
+
     start = time.monotonic()
     response = client.messages.create(
         model=model,
-        max_tokens=512,
+        max_tokens=max_tokens,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
     )
@@ -212,6 +221,12 @@ def classify_message(
         confidence = 0.5
     confidence = max(0.0, min(confidence, 1.0))
 
+    cost = _cost_usd(model, input_tokens, output_tokens)
+    print(
+        f"    [llm classify] actual ~${cost:.4f} "
+        f"({input_tokens} in / {output_tokens} out, {elapsed_s:.1f}s)",
+        flush=True,
+    )
     return ClassificationResult(
         category=category,
         subcategory=(str(data.get("subcategory") or "").strip() or None),
@@ -220,7 +235,7 @@ def classify_message(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         elapsed_s=elapsed_s,
-        cost_usd=_cost_usd(model, input_tokens, output_tokens),
+        cost_usd=cost,
     )
 
 
