@@ -147,6 +147,22 @@ python scripts/export_senders_cli.py
 
 ---
 
+## Tests & coverage
+
+```bash
+# Full classifier/ suite with line + branch coverage (uses .venv when present;
+# installs pytest-cov into that env if missing). Exits non-zero on failure.
+./scripts/coverage.sh
+```
+
+Coverage is measured for the `classifier/` package (what `tests/` exercises).
+For a workspace rollup with the sibling repos:
+
+```bash
+../report-coverage.sh
+# or: ../recruiting-automation/scripts/report-coverage-all.sh
+```
+
 ## Common tasks
 
 ```bash
