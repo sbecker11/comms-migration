@@ -88,6 +88,8 @@ else:
 print("  Note: coverage measured for classifier/ (the tested package), not contacts/ or scripts/.")
 print("  Colors: green ≥90% · yellow ≥70% · red <70%")
 PY
+  echo
+  "$PY" "$ROOT/scripts/check_per_file_coverage.py" --threshold 90 || true
 fi
 
 exit "$pytest_rc"

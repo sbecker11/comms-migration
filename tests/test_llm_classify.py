@@ -162,3 +162,46 @@ def test_classify_message_raises_without_categories(monkeypatch) -> None:
             valid_categories=[],
             client=client,
         )
+
+
+def test_client_requires_api_key(monkeypatch) -> None:
+    import classifier.llm_classify as m
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(LLMClassificationError, match="ANTHROPIC_API_KEY"):
+        m._client()
+
+
+def test_load_category_names_missing_and_present(tmp_path) -> None:
+    import classifier.llm_classify as m
+
+    missing = tmp_path / "nope.yaml"
+    assert m._load_category_names(missing) == []
+    path = tmp_path / "actions.yaml"
+    path.write_text("categories:\n  news: {}\n  social: {}\n")
+    assert m._load_category_names(path) == ["news", "social"]
+
+
+def test_parse_response_rejects_non_object() -> None:
+    import classifier.llm_classify as m
+
+    with pytest.raises(LLMClassificationError, match="JSON object"):
+        m._parse_response_text("[1,2,3]")
+
+
+def test_cost_usd_unknown_model() -> None:
+    import classifier.llm_classify as m
+
+    assert m._cost_usd("nope", 100, 50) == 0.0
+
+
+def test_classify_message_bad_confidence_falls_back() -> None:
+    client = _FakeClient(_response("news", confidence="not-a-number"))
+    result = classify_message(
+        from_address="x@example.com",
+        subject="s",
+        body="b",
+        valid_categories=VALID_CATEGORIES,
+        client=client,
+    )
+    assert result.confidence == 0.5

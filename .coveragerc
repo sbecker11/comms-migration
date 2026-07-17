@@ -1,0 +1,16 @@
+[run]
+source = classifier
+branch = true
+omit =
+    */__main__.py
+
+[report]
+# Soft interim floor — raise toward 90 once per-file gaps close. Hard
+# fail_under=90 is deferred; use scripts/check_per_file_coverage.py
+# (see COVERAGE.md).
+fail_under = 70
+show_missing = true
+skip_covered = false
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
