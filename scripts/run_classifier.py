@@ -112,9 +112,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--include-spam",
         action="store_true",
-        help="Also sweep the Spam folder (rules-only, no LLM fallback) and rescue any confident "
-        "rule match out of Spam entirely. See classifier/run.py's module docstring for why this "
-        "is deliberately more conservative than the normal inbox pass.",
+        help="Also sweep the Spam folder: rules first (free), then a high-confidence-only LLM "
+        "fallback (see --spam-min-confidence) unless --no-llm-fallback is also set. Rescues any "
+        "confident match out of Spam entirely. See classifier/run.py's module docstring for why "
+        "this is deliberately more conservative than the normal inbox pass.",
     )
     ap.add_argument(
         "--spam-limit",
