@@ -65,13 +65,13 @@ def _print_report(summary) -> None:
             print(f"  [{m.confidence:.2f}] {m.category:<18} {m.subject[:60]!r}  <{m.from_address}>")
 
     if summary.spam_scanned:
-        print(f"\nSpam folder scanned: {summary.spam_scanned} message(s), rules-only.")
+        print(f"\nSpam folder scanned: {summary.spam_scanned} message(s) (rules, then high-confidence LLM fallback).")
         if summary.rescued_from_spam:
             print(f"=== RESCUED FROM SPAM ({len(summary.rescued_from_spam)}) — worth a spot-check ===")
             for m in summary.rescued_from_spam:
-                print(f"  {m.category:<18} {m.subject[:60]!r}  <{m.from_address}>")
+                print(f"  [{m.source:<5}] {m.category:<18} {m.subject[:60]!r}  <{m.from_address}>")
         else:
-            print("Nothing in spam matched a confident rule — left untouched.")
+            print("Nothing in spam confidently matched (rule or LLM) — left untouched.")
 
     if summary.dead_rule_warnings:
         print(f"\n=== POSSIBLY DEAD RULES ({len(summary.dead_rule_warnings)}) ===")
