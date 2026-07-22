@@ -9,6 +9,7 @@ htmlcov/
 .DS_Store
 rules/senders.yaml
 rules/.rule_match_stats.json
+rules/.spam_sweep_seen.*.json
 
 # classifier/ local secrets/config — never commit real credentials or tokens
 .env

@@ -325,6 +325,25 @@ def label_and_archive(service, message_id: str, label_id: str) -> None:
     ).execute()
 
 
+def rescue_from_spam(service, message_id: str, label_id: str) -> None:
+    """Pull a message out of Spam and give it a real category label.
+
+    Unlike `label_and_archive` (which only strips INBOX — a message that's
+    never been in the inbox has nothing to strip there), a spam-origin
+    message also carries the SPAM label itself, which Gmail treats
+    specially: as long as SPAM is present, the message stays hidden from
+    every normal folder/search regardless of what other labels it has. Both
+    removals happen in one call so the message can't end up in a
+    half-rescued state (SPAM removed, INBOX still set — landing back in the
+    inbox — or vice versa) if the call were split in two.
+    """
+    service.users().messages().modify(
+        userId="me",
+        id=message_id,
+        body={"addLabelIds": [label_id], "removeLabelIds": ["SPAM", "INBOX"]},
+    ).execute()
+
+
 def list_category_labels(service) -> list[dict[str, str]]:
     """Every `Category/*` label that currently exists in this mailbox
     (classifier.actions.LABEL_PREFIX) — used by scripts/reset_categorization.py

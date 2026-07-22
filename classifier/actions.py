@@ -83,6 +83,7 @@ def execute_action(
     account: str | None = None,
     dry_run: bool = True,
     label_cache: dict[str, str] | None = None,
+    from_spam: bool = False,
 ) -> ActionOutcome:
     """Apply the label (and archive, if the action tier calls for it) for one message.
 
@@ -92,6 +93,14 @@ def execute_action(
 
     `label_cache` lets a batch run resolve each label id once instead of
     once per message (get_or_create_label is a Gmail API call).
+
+    `from_spam` marks this message as having been found via a spam-folder
+    sweep (see `run.classify_and_act`'s `include_spam`) rather than the
+    normal query. Always rescues it out of Spam (via
+    `gmail_client.rescue_from_spam`, regardless of `should_archive` below) —
+    a message a rule confidently matched has no business staying quarantined
+    in Spam even for a label-only category like `needs_review`; leaving SPAM
+    set would keep it invisible to every downstream consumer either way.
     """
     label = label_name(category)
     should_archive = default_action in _ARCHIVING_ACTIONS and not _never_archive(category, account)
@@ -101,7 +110,7 @@ def execute_action(
             message_id=message_id,
             category=category,
             label=label,
-            archived=should_archive,
+            archived=should_archive or from_spam,
             dry_run=True,
         )
 
@@ -111,7 +120,9 @@ def execute_action(
         label_id = gmail_client.get_or_create_label(service, label)
         label_cache[label] = label_id
 
-    if should_archive:
+    if from_spam:
+        gmail_client.rescue_from_spam(service, message_id, label_id)
+    elif should_archive:
         gmail_client.label_and_archive(service, message_id, label_id)
     else:
         gmail_client.apply_label(service, message_id, label_id)
@@ -120,6 +131,6 @@ def execute_action(
         message_id=message_id,
         category=category,
         label=label,
-        archived=should_archive,
+        archived=should_archive or from_spam,
         dry_run=False,
     )

@@ -211,6 +211,52 @@ real traffic yet.
 4. Anything the LLM call itself fails on lands in `spam_unknown`
    (quarantine) rather than blocking the run.
 
+The steps above all query `in:inbox` by default — Gmail search excludes
+Spam/Trash unless asked for explicitly, so anything Gmail's own spam filter
+swallows is invisible to this whole pipeline by default. Verified live
+(2026-07-21): a real recruiter's job-description email (a one-off staffing
+agency domain with no existing sender rule) landed in Spam and sat there for
+a full day, unseen by every downstream consumer.
+
+### Spam-folder sweep (`--include-spam`)
+
+`scripts/run_classifier.py --include-spam` adds a second, more conservative
+pass over `in:spam`:
+
+- Rules first (free), then a **high-confidence-only** LLM fallback
+  (`--spam-min-confidence`, default 0.75 — stricter than the primary pass,
+  since this runs over mail Gmail itself already flagged as suspect).
+- No `spam_unknown` re-labeling — anything that doesn't confidently resolve
+  is left exactly where Gmail put it.
+- `--spam-categories recruiter_job` (used by the automated hourly run, see
+  `recruiting-automation/run_cycle.sh`) restricts *rescue* to that one
+  category — a confidently-classified `political`/`ai`/`spam_unknown`
+  message from Spam has no reason to get pulled into the archive too.
+  Omit it in an ad-hoc/manual run to rescue on any confident match.
+- Anything rescued is pulled out of Spam entirely (`SPAM` label removed,
+  not just `INBOX`) via `gmail_client.rescue_from_spam`.
+- Each spam message is only ever classified **once**, tracked in
+  `rules/.spam_sweep_seen.<account>.json` (gitignored, per-account) — a
+  message that stays in Spam is never re-classified on a later run, which
+  is what actually bounds recurring LLM cost for an hourly job (a single
+  test run against ~100 real spam messages made 91 LLM calls before this
+  cache existed). Written **the moment each message finishes classifying**,
+  not batched up and saved once at the end of the whole sweep — the
+  original batched-at-the-end version threw away an entire run's worth of
+  already-paid-for LLM calls (834 of them, in the 2026-07-21 incident that
+  motivated this) the first time the sweep hit the automated job's step
+  timeout, since `run_step`'s `timeout` sends SIGTERM straight to the
+  process, which skips any Python cleanup code that would otherwise flush
+  a batched write.
+- `--spam-limit N` caps how many `in:spam` messages a single run will even
+  fetch (no cap by default) — the automated hourly job passes `100` (see
+  `recruiting-automation/run_cycle.sh`) specifically to keep any one run
+  comfortably under the step timeout even against a large backlog; the
+  seen-cache means a big backlog still gets fully worked through, just
+  gradually across several hourly cycles instead of one giant first pass.
+
+See `classifier/run.py`'s module docstring for the full design rationale.
+
 ### Rule schema (`rules/rules.yaml`)
 
 Replaced the old flat domain/email dicts (2026-07-04) with a schema modeled

@@ -64,6 +64,15 @@ def _print_report(summary) -> None:
         for m in low_confidence[:15]:
             print(f"  [{m.confidence:.2f}] {m.category:<18} {m.subject[:60]!r}  <{m.from_address}>")
 
+    if summary.spam_scanned:
+        print(f"\nSpam folder scanned: {summary.spam_scanned} message(s), rules-only.")
+        if summary.rescued_from_spam:
+            print(f"=== RESCUED FROM SPAM ({len(summary.rescued_from_spam)}) — worth a spot-check ===")
+            for m in summary.rescued_from_spam:
+                print(f"  {m.category:<18} {m.subject[:60]!r}  <{m.from_address}>")
+        else:
+            print("Nothing in spam matched a confident rule — left untouched.")
+
     if summary.dead_rule_warnings:
         print(f"\n=== POSSIBLY DEAD RULES ({len(summary.dead_rule_warnings)}) ===")
         for w in summary.dead_rule_warnings:
@@ -100,6 +109,33 @@ def main(argv: list[str] | None = None) -> int:
         help="Rules only — never call the LLM for unresolved senders (unresolved -> spam_unknown)",
     )
     ap.add_argument("--llm-model", default=DEFAULT_LLM_MODEL)
+    ap.add_argument(
+        "--include-spam",
+        action="store_true",
+        help="Also sweep the Spam folder (rules-only, no LLM fallback) and rescue any confident "
+        "rule match out of Spam entirely. See classifier/run.py's module docstring for why this "
+        "is deliberately more conservative than the normal inbox pass.",
+    )
+    ap.add_argument(
+        "--spam-limit",
+        type=int,
+        help="Max messages to scan in the Spam sweep (defaults to no limit / --limit's value is NOT reused here)",
+    )
+    ap.add_argument(
+        "--spam-min-confidence",
+        type=float,
+        default=0.75,
+        help="Minimum LLM confidence to rescue a Spam message with no rule match (default: 0.75; ignored for "
+        "rule-based matches, which are always rescued)",
+    )
+    ap.add_argument(
+        "--spam-categories",
+        nargs="*",
+        default=None,
+        metavar="CATEGORY",
+        help="Restrict Spam-sweep rescues to these categories (e.g. --spam-categories recruiter_job). Default: "
+        "rescue on any confident match, regardless of category.",
+    )
     ap.add_argument("--json", action="store_true", help="Emit the full summary as JSON instead of a report")
     ap.add_argument(
         "--no-rule-telemetry",
@@ -130,6 +166,10 @@ def main(argv: list[str] | None = None) -> int:
         llm_model=args.llm_model,
         service=service,
         record_rule_telemetry=not args.no_rule_telemetry,
+        include_spam=args.include_spam,
+        spam_limit=args.spam_limit,
+        spam_min_confidence=args.spam_min_confidence,
+        spam_categories=set(args.spam_categories) if args.spam_categories else None,
     )
 
     if args.json:
@@ -143,6 +183,16 @@ def main(argv: list[str] | None = None) -> int:
                     "llm_calls": summary.llm_calls,
                     "llm_cost_usd": summary.llm_cost_usd,
                     "dead_rule_warnings": summary.dead_rule_warnings,
+                    "spam_scanned": summary.spam_scanned,
+                    "rescued_from_spam": [
+                        {
+                            "message_id": m.message_id,
+                            "from": m.from_address,
+                            "subject": m.subject,
+                            "category": m.category,
+                        }
+                        for m in summary.rescued_from_spam
+                    ],
                     "messages": [
                         {
                             "message_id": m.message_id,
