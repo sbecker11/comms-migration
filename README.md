@@ -145,6 +145,65 @@ python scripts/export_senders_cli.py
 
 `Contacts.yaml` and `senders.yaml` are gitignored, so steps 2–3 stay local.
 
+**`.env` is git-crypt encrypted, not git-ignored** (2026-08-19): unlike
+`Contacts.yaml`/`senders.yaml` above, `.env` is intentionally *tracked* so
+real config travels with the repo, but `.gitattributes` (`.env
+filter=git-crypt diff=git-crypt`) makes git transparently AES-256-encrypt
+it on commit and decrypt it on checkout — GitHub only ever stores
+ciphertext. On this machine that's already invisible (the key was
+registered here when git-crypt was set up), but a fresh clone anywhere
+else needs one manual step — see below.
+
+### Decrypting `.env` on a new machine
+
+On a brand-new clone of this repo (a different Mac, a CI runner, anywhere
+the key hasn't been registered yet), `.env` in the working tree is opaque
+ciphertext until unlocked:
+
+1. **Install `git-crypt`** on that machine (not needed on this one, where
+   it's already installed and registered):
+   ```bash
+   brew install git-crypt
+   ```
+2. **Get the key file there securely.** The symmetric key lives outside git
+   entirely, at `~/.git-crypt-keys/comms-migration.key` on this Mac (`chmod
+   600`). Copy that exact file to the new machine through an out-of-band
+   channel you trust — an encrypted USB drive, your password manager's
+   secure file/attachment storage, or `scp` directly between two machines
+   you control over SSH. **Never** email it, commit it to any git repo
+   (this one or otherwise), or paste its contents into chat/Slack/any other
+   unencrypted channel.
+3. **Clone the repo as usual, then unlock from the repo root** with the
+   copied key file:
+   ```bash
+   git-crypt unlock /path/to/copied/comms-migration.key
+   ```
+   This decrypts the currently-checked-out `.env` in place and registers
+   the key with that machine's local `.git` directory, so every future
+   checkout and commit on that machine is transparent from then on.
+4. **Verify it worked:**
+   ```bash
+   git-crypt status    # "encrypted: .env" reflects .gitattributes config,
+                        # not lock state, so it prints that either way —
+                        # it's a sanity check the filter is wired up, not
+                        # proof of a successful unlock
+   cat .env             # the real proof: readable plaintext config lines,
+                        # not binary garbage
+   ```
+   `git-crypt unlock` itself also fails loudly (non-zero exit, an error
+   message) if the key file is wrong or the working tree isn't clean, so a
+   silent successful return plus a readable `.env` together confirm success.
+5. **If you clone and never run `git-crypt unlock`:** this is the safe
+   default, not a bug. `.env` stays as encrypted bytes in the working tree;
+   `classifier/__init__.py` falls back to the shared
+   `workspace-recruiting-automation/.env` (or no key at all) instead of
+   reading a garbled local override — never a silent leak, never a crash.
+6. **If the key file is ever lost with no other copy, it's unrecoverable —
+   there is no backdoor.** Keep a durable backup of it (and its
+   `job-tracker.key` / `recruiting-automation.key` siblings) somewhere
+   outside git entirely — a password manager's secure notes/file storage,
+   or macOS Keychain, both work well.
+
 ---
 
 ## Tests & coverage
@@ -453,11 +512,11 @@ even if you've already authorized job-tracker against
 # 1. Anthropic key for the LLM fallback
 # Prefer the shared workspace key at
 #   ~/workspace-recruiting-automation/.env
-# (single copy used by both this repo and job-tracker). Only copy + set a
-# local .env if you want this repo to override that key — leave
-# ANTHROPIC_API_KEY commented out in .env.example / local .env so an empty
-# local entry doesn't block the shared-file fallback (see classifier/__init__.py).
-# cp .env.example .env   # optional local override only
+# (single copy used by both this repo and job-tracker). This repo's own
+# .env is already tracked (git-crypt encrypted — see "Decrypting .env on a
+# new machine" above) with ANTHROPIC_API_KEY commented out on purpose, so
+# it doesn't block the shared-file fallback (see classifier/__init__.py).
+# Only uncomment a value there if you want this repo to override that key.
 
 # 2. Per account: download an OAuth Desktop client (Google Cloud Console)
 #    for that Google account, then place/point at it. The same OAuth
