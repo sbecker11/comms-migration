@@ -11,7 +11,10 @@ rules/senders.yaml
 rules/.rule_match_stats.json
 rules/.spam_sweep_seen.*.json
 
-# classifier/ local secrets/config — never commit real credentials or tokens
-.env
+# classifier/ local secrets/config — never commit real credentials or tokens.
+# .env itself is the exception (as of 2026-08-19): it's intentionally
+# tracked, but transparently AES-256 encrypted at rest by git-crypt (see
+# .gitattributes), so GitHub only ever stores/serves ciphertext. credentials
+# and OAuth tokens below stay plaintext-ignored, never committed in any form.
 credentials.json
 token.json
