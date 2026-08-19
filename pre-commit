@@ -104,7 +104,16 @@ note_secret() { secret_hits=$((secret_hits+1)); printf '%s  SECRET%s  %s\n' "$RE
 note_junk()   { junk_hits=$((junk_hits+1));   printf '%s  JUNK  %s  %s\n' "$YEL" "$RST" "$1"; }
 
 # Staged, added/copied/modified files (NUL-delimited for spaces in names).
-mapfile -d '' -t FILES < <(git diff --cached --name-only --diff-filter=ACM -z)
+# Portable read loop instead of `mapfile -d ''` — mapfile is a bash-4+
+# builtin and macOS ships bash 3.2 (Apple hasn't upgraded it for licensing
+# reasons since ~2007), so `mapfile` silently doesn't exist there and every
+# invocation of this hook failed with "command not found" instead of
+# actually scanning anything (found 2026-08-18 while installing this hook
+# into two sibling repos — it had never worked on this machine).
+FILES=()
+while IFS= read -r -d '' f; do
+  FILES+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACM -z)
 
 if [ "${#FILES[@]}" -eq 0 ]; then
   exit 0
