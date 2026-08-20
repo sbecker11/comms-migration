@@ -42,8 +42,34 @@ _SHARED_ENV = (
     if _WORKSPACE_ROOT_OVERRIDE
     else _PROJECT_ROOT_ENV.parent.parent / ".env"
 )
-load_dotenv(_PROJECT_ROOT_ENV)
-load_dotenv(_SHARED_ENV)
+def _safe_load_dotenv(path: Path) -> None:
+    """`load_dotenv`, tolerant of a still-git-crypt-encrypted `.env`.
+
+    A git-crypt-encrypted `.env` that hasn't been `git-crypt unlock`ed yet
+    (a fresh clone with no key registered, or CI, which never has the key
+    at all) checks out as raw AES-256 ciphertext, not valid UTF-8 text.
+    Without this, python-dotenv's parser raises UnicodeDecodeError — and
+    since this module-level load runs at package-import time, that crashed
+    *every* test file that imports classifier (observed 2026-08-19: all 15
+    test files failing identically in CI right after `.env` was git-crypt-
+    encrypted). This makes the encrypted-but-unlocked case degrade safely
+    instead of a hard crash, matching what the docs already promise.
+    """
+    try:
+        load_dotenv(path)
+    except UnicodeDecodeError:
+        pass
+
+
+def _safe_dotenv_values(path: Path) -> dict:
+    try:
+        return dotenv_values(path)
+    except UnicodeDecodeError:
+        return {}
+
+
+_safe_load_dotenv(_PROJECT_ROOT_ENV)
+_safe_load_dotenv(_SHARED_ENV)
 
 
 def _log_env_key_source(key: str) -> None:
@@ -65,9 +91,9 @@ def _log_env_key_source(key: str) -> None:
     # present-but-blank entry in either file (which load_dotenv treats as
     # "already set" and won't let a later call override) can't be misreported
     # as the source when it actually contributed nothing.
-    if dotenv_values(_PROJECT_ROOT_ENV).get(key) == value:
+    if _safe_dotenv_values(_PROJECT_ROOT_ENV).get(key) == value:
         source = f"local .env ({_PROJECT_ROOT_ENV})"
-    elif dotenv_values(_SHARED_ENV).get(key) == value:
+    elif _safe_dotenv_values(_SHARED_ENV).get(key) == value:
         source = f"shared .env ({_SHARED_ENV})"
     else:
         source = "pre-existing shell/process environment"
