@@ -1,5 +1,7 @@
 # comms-migration — Cursor project instructions
 
+**Humans:** [`README.md`](README.md) · umbrella [`docs/WORKSPACE.md`](docs/WORKSPACE.md) · secrets [`docs/SECRETS.md`](docs/SECRETS.md).
+
 Single source of truth for **routing**: which hub/inbox a sender lands in, and
 the four-into-one forward into `shawnbecker.recruiting@gmail.com`.
 
