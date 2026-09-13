@@ -32,12 +32,14 @@ not by spinning up another account.
 **Corrected 2026-07-04:** this table previously listed `scbboston@gmail.com`
 as a fourth leg forwarding into the recruiting funnel. Verified directly
 against the live Gmail API (`scripts/check_forwarding.py --account
-personal_hub`) that this is **not the case** — `scbboston@gmail.com` has no
-auto-forwarding, no registered forwarding addresses, and no filter that
-forwards mail. It is a dead-end hub; recruiter/job mail that lands there
-does not reach the recruiting funnel on its own (see
-`comms-migration-runbook.md` Phase 5 / `classifier/` and job-tracker's
-`personal_hub` polling, which exist specifically to bridge that gap).
+personal_hub`, historically) that this is **not the case** —
+`scbboston@gmail.com` has no auto-forwarding, no registered forwarding
+addresses, and no filter that forwards mail. It is a dead-end hub;
+recruiter/job mail that lands there does not reach the recruiting funnel
+on its own. As of 2026-09-13, neither `comms-migration` nor `job-tracker`
+processes `personal_hub` / `scbboston@gmail.com` — that mailbox is left
+untouched. Recruiting mail must land in `shawnbecker.recruiting@gmail.com`
+(or Spexture/iCloud IMAP).
 
 Three source addresses forward into `shawnbecker.recruiting@gmail.com`:
 
@@ -46,6 +48,8 @@ Three source addresses forward into `shawnbecker.recruiting@gmail.com`:
 | `shawn.becker@spexture.com`                             | Hostinger (hPanel) forwarder, **keep-a-copy ON** | Passive backup only as of 2026-07-04 — see note below. **Canary-verified 2026-07-04**: arrived in ~4 min. |
 | `scb_boston@yahoo.com` (alias `shawn.becker@yahoo.com`) | Yahoo Mail Plus auto-forward                     | Near-real-time push; Plus is a paid feature. **Canary-verified 2026-07-04**: arrived in ~6 min. |
 | `sbecker@alum.mit.edu`                                  | **Fixed and confirmed working as of 2026-07-04 ~1:40 PM MT** | **Full timeline:** (1) Canary `CANARY-MIT-20260704-001331` (~12:13 AM MT) exposed MIT had no active forwarding address — mail was accepted by MIT but never forwarded. (2) Forwarding address list updated ~12:31 PM MT via MIT Infinite Connection, confirmed by automated email from `help@alum.mit.edu`; Delivery Options confirmed set to "Deliver and forward." (3) Retest canary `CANARY-MIT-RETEST-20260704-124103` sent 12:41 PM MT — only 10 minutes after the address update — never forwarded either; landed only in the MIT-hosted alumni Outlook mailbox. Given MIT's own "up to 1 hour" propagation guidance, this message is presumed to have been received by MIT's mail system before forwarding fully activated on their backend, and (like the original canary) simply won't be retroactively forwarded — treat both as expected casualties of the transition window, not evidence of an unresolved problem. (4) A further manual test (`PEACOCK`, sent ~1:39-1:40 PM, well into/past the propagation window) **was confirmed forwarded correctly** to `shawnbecker.recruiting@gmail.com`. **Conclusion: forwarding is fixed and working.** Recruiting funnel account itself was confirmed healthy throughout (other real mail, e.g. LinkedIn/Ladders job digests, flowing and labeling normally). Historical backlog risk remains: unknown how long forwarding was inactive before today — still worth a one-time check of the alumni Outlook mailbox for any real mail (not just test canaries) that arrived during that window and was never forwarded. |
+
+**Not a forward:** `sbecker11@icloud.com` / `@mac.com` / `@me.com` (one iCloud mailbox) is **not** redirected into the recruiting funnel. job-tracker polls it over IMAP (`--imap-prefix ICLOUD --personal-mailbox`) when `ICLOUD_IMAP_*` is set — see `job-tracker/docs/MAILBOX_COVERAGE.md`.
 
 **Decision (2026-07-04): dropped Mac Mail as the daily client, kept
 `keep-a-copy` ON.** Gmail (the recruiting funnel) is now the sole place

@@ -45,7 +45,7 @@ cp contacts/Contacts.yaml.example contacts/Contacts.yaml   # then populate
 python scripts/export_senders_cli.py
 
 # Dry-run classifier (needs OAuth under ~/.config/comms-classifier/ — see below)
-python scripts/run_classifier.py --account personal_hub --dry-run --limit 10
+python scripts/run_classifier.py --account recruiting_funnel --dry-run --limit 10
 ```
 
 ## Common commands
@@ -55,7 +55,7 @@ python scripts/run_classifier.py --account personal_hub --dry-run --limit 10
 | Regenerate routing table | `python scripts/export_senders_cli.py` |
 | Default unassigned → Personal | `python scripts/default_contacts_personal.py` |
 | Contacts UI | `python contacts_app/main.py` |
-| Classify (dry-run) | `python scripts/run_classifier.py --account personal_hub --dry-run --limit 25` |
+| Classify (dry-run) | `python scripts/run_classifier.py --account recruiting_funnel --dry-run --limit 25` |
 | Validate rules | `python scripts/validate_rules.py` |
 | Dead-rule telemetry | `python scripts/check_dead_rules.py` |
 | Tests / coverage | `./scripts/coverage.sh` |
@@ -76,12 +76,10 @@ Classifier resolution: `rules.yaml` → `senders.yaml` → LLM fallback → `spa
 Needs `gmail.modify` (separate tokens from job-tracker even for the same account):
 
 ```bash
-mkdir -p ~/.config/comms-classifier/{personal_hub,recruiting_funnel}
-cp ~/Downloads/client_secret_*.json ~/.config/comms-classifier/personal_hub/credentials.json
-cp ~/.config/comms-classifier/personal_hub/credentials.json \
+mkdir -p ~/.config/comms-classifier/recruiting_funnel
+cp ~/Downloads/client_secret_*.json \
    ~/.config/comms-classifier/recruiting_funnel/credentials.json
 
-python scripts/run_classifier.py --account personal_hub --dry-run --limit 10
 python scripts/run_classifier.py --account recruiting_funnel --dry-run --limit 10
 ```
 

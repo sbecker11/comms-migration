@@ -79,12 +79,12 @@ class _FakeService:
 
 
 def test_account_paths(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv("COMMS_CLASSIFIER_PERSONAL_CREDENTIALS", str(tmp_path / "creds.json"))
-    assert gmail_client.default_credentials_path("personal_hub") == tmp_path / "creds.json"
-    monkeypatch.delenv("COMMS_CLASSIFIER_PERSONAL_CREDENTIALS", raising=False)
-    assert gmail_client.default_credentials_path("personal_hub").name == "credentials.json"
-    assert gmail_client.default_token_path("personal_hub").name == "token.json"
-    assert gmail_client.account_config_dir("personal_hub").name == "personal_hub"
+    monkeypatch.setenv("COMMS_CLASSIFIER_RECRUITING_CREDENTIALS", str(tmp_path / "creds.json"))
+    assert gmail_client.default_credentials_path("recruiting_funnel") == tmp_path / "creds.json"
+    monkeypatch.delenv("COMMS_CLASSIFIER_RECRUITING_CREDENTIALS", raising=False)
+    assert gmail_client.default_credentials_path("recruiting_funnel").name == "credentials.json"
+    assert gmail_client.default_token_path("recruiting_funnel").name == "token.json"
+    assert gmail_client.account_config_dir("recruiting_funnel").name == "recruiting_funnel"
 
 
 def test_build_query_and_list_ids():

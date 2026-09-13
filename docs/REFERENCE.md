@@ -525,12 +525,8 @@ even if you've already authorized job-tracker against
 #    client (client_secret_*.json) can be reused across accounts — each
 #    account just needs its own copy under its own config directory so it
 #    gets its own token.json.
-mkdir -p ~/.config/comms-classifier/personal_hub
-cp ~/Downloads/client_secret_*.json ~/.config/comms-classifier/personal_hub/credentials.json
-#    (or set COMMS_CLASSIFIER_PERSONAL_CREDENTIALS to its path instead)
-
 mkdir -p ~/.config/comms-classifier/recruiting_funnel
-cp ~/.config/comms-classifier/personal_hub/credentials.json ~/.config/comms-classifier/recruiting_funnel/credentials.json
+cp ~/Downloads/client_secret_*.json ~/.config/comms-classifier/recruiting_funnel/credentials.json
 #    (or set COMMS_CLASSIFIER_RECRUITING_CREDENTIALS to its path instead)
 
 # 3. First run opens a browser for consent and caches a token.json
@@ -538,18 +534,14 @@ cp ~/.config/comms-classifier/personal_hub/credentials.json ~/.config/comms-clas
 #    consent/token from job-tracker's, even for the same Gmail account —
 #    job-tracker only ever requests gmail.readonly, while this classifier
 #    needs gmail.modify to label/archive.
-python scripts/run_classifier.py --account personal_hub --dry-run --limit 10
 python scripts/run_classifier.py --account recruiting_funnel --dry-run --limit 10
 ```
 
 Registered accounts live in `classifier/gmail_client.ACCOUNTS`
-(`recruiting_funnel`, `personal_hub` today). The classifier runs against
-**both** — `recruiting_funnel` gets the full category taxonomy too, not
-just `recruiter_job` handling (see "recruiter_job mail" above for the one
-behavioral difference between the two accounts). `shawn.becker@yahoo.com`
-and `sbecker@alum.mit.edu` are forward-only aliases with no mailbox of
-their own (Phase 2) — their mail already lands inside `personal_hub`, so
-they don't need separate registration.
+(`recruiting_funnel` only as of 2026-09-13 — `personal_hub` /
+`scbboston@gmail.com` was removed from the classifier). Forward-only
+aliases (`shawn.becker@yahoo.com`, `sbecker@alum.mit.edu`) still do not
+need separate registration.
 
 **Always dry-run a new account first.** `--dry-run` reports exactly what
 would be labeled/archived without calling any mutating Gmail API.

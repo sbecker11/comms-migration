@@ -13,7 +13,7 @@ from classifier import gmail_client
 def test_get_gmail_service_missing_creds(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         gmail_client.get_gmail_service(
-            "personal_hub",
+            "recruiting_funnel",
             credentials_path=tmp_path / "missing.json",
             token_path=tmp_path / "tok.json",
         )
@@ -52,7 +52,7 @@ def test_get_gmail_service_valid_cached_token(monkeypatch, tmp_path: Path):
     )
 
     svc = gmail_client.get_gmail_service(
-        "personal_hub", credentials_path=creds, token_path=token
+        "recruiting_funnel", credentials_path=creds, token_path=token
     )
     assert svc is built
 
@@ -92,7 +92,7 @@ def test_get_gmail_service_fresh_login(monkeypatch, tmp_path: Path):
     )
 
     svc = gmail_client.get_gmail_service(
-        "personal_hub", credentials_path=creds, token_path=token
+        "recruiting_funnel", credentials_path=creds, token_path=token
     )
     assert svc is built
     assert token.is_file()

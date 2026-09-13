@@ -2,8 +2,8 @@
 
 Generalizes the single-account pattern from job-tracker's
 `job_tracker/email/gmail_reader.py` to support classifying mail across
-several mapped Gmail accounts (the recruiting funnel and the personal hub
-today; more can be registered as they get their own OAuth client).
+registered Gmail accounts. Currently only the recruiting funnel is
+registered (`scbboston@gmail.com` / `personal_hub` was removed 2026-09-13).
 
 Each account gets its own credentials/token pair under
 ``~/.config/comms-classifier/<account>/``, so accounts never share tokens
@@ -38,10 +38,6 @@ ACCOUNTS: dict[str, dict[str, str]] = {
     "recruiting_funnel": {
         "email": "shawnbecker.recruiting@gmail.com",
         "credentials_env": "COMMS_CLASSIFIER_RECRUITING_CREDENTIALS",
-    },
-    "personal_hub": {
-        "email": "scbboston@gmail.com",
-        "credentials_env": "COMMS_CLASSIFIER_PERSONAL_CREDENTIALS",
     },
 }
 

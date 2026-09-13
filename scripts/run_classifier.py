@@ -10,16 +10,16 @@ Pass `--newer-than 0` to process mail of any age.
 
 Examples:
     # Safe first look — nothing is modified, just reports what WOULD happen.
-    python scripts/run_classifier.py --account personal_hub --dry-run --limit 25
+    python scripts/run_classifier.py --account recruiting_funnel --dry-run --limit 25
 
     # Same, but skip the LLM fallback (rules only, zero API cost).
-    python scripts/run_classifier.py --account personal_hub --dry-run --no-llm-fallback --limit 25
+    python scripts/run_classifier.py --account recruiting_funnel --dry-run --no-llm-fallback --limit 25
 
     # Actually label + archive per the resolved actions (last 30 days only).
-    python scripts/run_classifier.py --account personal_hub --newer-than 30
+    python scripts/run_classifier.py --account recruiting_funnel --newer-than 30
 
     # Process mail of any age (disables the default 365-day cutoff).
-    python scripts/run_classifier.py --account personal_hub --newer-than 0 --limit 25
+    python scripts/run_classifier.py --account recruiting_funnel --newer-than 0 --limit 25
 """
 
 from __future__ import annotations
