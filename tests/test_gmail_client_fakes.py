@@ -130,3 +130,53 @@ def test_list_message_ids_with_label_and_batch_modify():
     svc.batchModify = batchModify
     gmail_client.batch_modify(svc, ["a", "b"], add_label_ids=["L1"], remove_label_ids=["INBOX"])
     assert calls and calls[0]["body"]["ids"] == ["a", "b"]
+
+
+class _QuotaError(RuntimeError):
+    def __init__(self):
+        super().__init__(
+            "HttpError 403 Quota exceeded for quota metric 'Total Query Cost' "
+            "and limit 'Units per minute per user' ... rateLimitExceeded"
+        )
+        self.resp = SimpleNamespace(status=403)
+
+
+def test_is_gmail_rate_limit_detects_quota_403():
+    assert gmail_client.is_gmail_rate_limit(_QuotaError())
+    other = RuntimeError("permission denied")
+    other.resp = SimpleNamespace(status=403)
+    assert not gmail_client.is_gmail_rate_limit(other)
+
+
+def test_execute_gmail_does_not_retry_quota():
+    class Once:
+        def __init__(self):
+            self.calls = 0
+
+        def execute(self):
+            self.calls += 1
+            raise _QuotaError()
+
+    slept: list[float] = []
+    req = Once()
+    with pytest.raises(_QuotaError):
+        gmail_client.execute_gmail(req, _sleep=slept.append)
+    assert req.calls == 1
+    assert slept == []
+
+
+def test_apply_label_propagates_quota():
+    class FlakyService(_FakeService):
+        def modify(self, **kwargs):
+            self.modify_calls.append(kwargs)
+
+            class Boom:
+                def execute(self):
+                    raise _QuotaError()
+
+            return Boom()
+
+    svc = FlakyService()
+    with pytest.raises(_QuotaError):
+        gmail_client.apply_label(svc, "m1", "L1")
+    assert len(svc.modify_calls) == 1

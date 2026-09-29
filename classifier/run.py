@@ -72,6 +72,7 @@ after all) instead of it silently reshaping the mailbox.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -107,6 +108,21 @@ class RunSummary:
     # aren't diluted by a pass over a totally different mailbox folder.
     spam_scanned: int = 0
     rescued_from_spam: list[ClassifiedMessage] = field(default_factory=list)
+    # Messages left unprocessed because Gmail quota was hit this cycle.
+    # Next hourly cycle picks them up — do not HALT the schedule for this.
+    deferred_for_quota: int = 0
+
+
+def _note_gmail_quota(exc: BaseException, *, processed: int, remaining: int, summary: RunSummary, where: str) -> bool:
+    if not gmail_client.is_gmail_rate_limit(exc):
+        return False
+    print(
+        f"Gmail quota exhausted during {where} after {processed} message(s); "
+        f"deferring {remaining} to the next hour (exit 0, no HALT).",
+        file=sys.stderr,
+    )
+    summary.deferred_for_quota += remaining
+    return True
 
 
 def classify_and_act(
@@ -131,74 +147,86 @@ def classify_and_act(
     engine = rules_engine or RulesEngine()
     service = service or gmail_client.get_gmail_service(account)
 
-    message_ids = gmail_client.list_message_ids(
-        service, query=query, limit=limit, newer_than_days=newer_than_days
-    )
+    try:
+        message_ids = gmail_client.list_message_ids(
+            service, query=query, limit=limit, newer_than_days=newer_than_days
+        )
+    except Exception as exc:
+        summary = RunSummary(account=account, total_messages=0)
+        if _note_gmail_quota(exc, processed=0, remaining=1, summary=summary, where="list"):
+            return summary
+        raise
 
     summary = RunSummary(account=account, total_messages=len(message_ids))
     label_cache: dict[str, str] = {}
     hits_per_message: list[list[str]] = []
 
-    for message_id in message_ids:
-        raw = gmail_client.fetch_message(service, message_id)
-        message_kwargs = dict(
-            to_address=raw.to_address,
-            cc_address=raw.cc_address,
-            subject=raw.subject,
-            body=raw.body_plain or raw.snippet,
-            date_sent=raw.date_sent,
-            date_received=raw.date_received,
-        )
-
-        rule_match = engine.classify(raw.from_address, **message_kwargs)
-        # Independent of rule_match above: every active rule's verdict on
-        # this message, for empirical dead-rule telemetry — see
-        # classifier/rule_telemetry.py. Cheap (a few dozen boolean
-        # expression evaluations) relative to one Gmail API call/message.
-        if record_rule_telemetry:
-            hits_per_message.append(engine.all_rule_hits(raw.from_address, **message_kwargs))
-        llm_result: ClassificationResult | None = None
-        category: str
-        source: str
-        confidence: float
-        default_action: str
-
-        if rule_match is not None:
-            category = rule_match.category
-            source = "rules"
-            confidence = rule_match.confidence
-            default_action = rule_match.default_action
-        elif use_llm_fallback:
-            llm_kwargs = {"model": llm_model} if llm_model else {}
-            llm_result = classify_message_safe(
-                from_address=raw.from_address,
+    for i, message_id in enumerate(message_ids):
+        try:
+            raw = gmail_client.fetch_message(service, message_id)
+            message_kwargs = dict(
+                to_address=raw.to_address,
+                cc_address=raw.cc_address,
                 subject=raw.subject,
                 body=raw.body_plain or raw.snippet,
-                **llm_kwargs,
+                date_sent=raw.date_sent,
+                date_received=raw.date_received,
             )
-            if llm_result is not None:
-                category = llm_result.category
-                source = "llm"
-                confidence = llm_result.confidence
-                default_action = engine.action_for_category(category).get("default_action", "flag")
-                summary.llm_calls += 1
-                summary.llm_cost_usd += llm_result.cost_usd
+
+            rule_match = engine.classify(raw.from_address, **message_kwargs)
+            # Independent of rule_match above: every active rule's verdict on
+            # this message, for empirical dead-rule telemetry — see
+            # classifier/rule_telemetry.py. Cheap (a few dozen boolean
+            # expression evaluations) relative to one Gmail API call/message.
+            if record_rule_telemetry:
+                hits_per_message.append(engine.all_rule_hits(raw.from_address, **message_kwargs))
+            llm_result: ClassificationResult | None = None
+            category: str
+            source: str
+            confidence: float
+            default_action: str
+
+            if rule_match is not None:
+                category = rule_match.category
+                source = "rules"
+                confidence = rule_match.confidence
+                default_action = rule_match.default_action
+            elif use_llm_fallback:
+                llm_kwargs = {"model": llm_model} if llm_model else {}
+                llm_result = classify_message_safe(
+                    from_address=raw.from_address,
+                    subject=raw.subject,
+                    body=raw.body_plain or raw.snippet,
+                    **llm_kwargs,
+                )
+                if llm_result is not None:
+                    category = llm_result.category
+                    source = "llm"
+                    confidence = llm_result.confidence
+                    default_action = engine.action_for_category(category).get("default_action", "flag")
+                    summary.llm_calls += 1
+                    summary.llm_cost_usd += llm_result.cost_usd
+                else:
+                    category, source, confidence = "spam_unknown", "fallback", 0.0
+                    default_action = engine.action_for_category(category).get("default_action", "quarantine")
             else:
                 category, source, confidence = "spam_unknown", "fallback", 0.0
                 default_action = engine.action_for_category(category).get("default_action", "quarantine")
-        else:
-            category, source, confidence = "spam_unknown", "fallback", 0.0
-            default_action = engine.action_for_category(category).get("default_action", "quarantine")
 
-        outcome = execute_action(
-            service,
-            message_id=message_id,
-            category=category,
-            default_action=default_action,
-            account=account,
-            dry_run=dry_run,
-            label_cache=label_cache,
-        )
+            outcome = execute_action(
+                service,
+                message_id=message_id,
+                category=category,
+                default_action=default_action,
+                account=account,
+                dry_run=dry_run,
+                label_cache=label_cache,
+            )
+        except Exception as exc:
+            remaining = len(message_ids) - i
+            if _note_gmail_quota(exc, processed=i, remaining=remaining, summary=summary, where="classify"):
+                break
+            raise
 
         summary.by_category[category] = summary.by_category.get(category, 0) + 1
         summary.by_source[source] = summary.by_source.get(source, 0) + 1
@@ -285,9 +313,14 @@ def _sweep_spam(
     every message finished before that point stays recorded no matter how
     the process ends.
     """
-    spam_ids = gmail_client.list_message_ids(
-        service, query="in:spam", limit=limit, newer_than_days=newer_than_days
-    )
+    try:
+        spam_ids = gmail_client.list_message_ids(
+            service, query="in:spam", limit=limit, newer_than_days=newer_than_days
+        )
+    except Exception as exc:
+        if _note_gmail_quota(exc, processed=0, remaining=1, summary=summary, where="spam list"):
+            return
+        raise
     already_seen = spam_sweep_state.load_seen(account, path=seen_path)
     new_ids = [mid for mid in spam_ids if mid not in already_seen]
     summary.spam_scanned = len(new_ids)
@@ -296,75 +329,81 @@ def _sweep_spam(
         if not dry_run:
             spam_sweep_state.mark_seen(account, [mid], path=seen_path)
 
-    for message_id in new_ids:
-        raw = gmail_client.fetch_message(service, message_id)
-        rule_match = engine.classify(
-            raw.from_address,
-            to_address=raw.to_address,
-            cc_address=raw.cc_address,
-            subject=raw.subject,
-            body=raw.body_plain or raw.snippet,
-            date_sent=raw.date_sent,
-            date_received=raw.date_received,
-        )
-
-        category: str
-        source: str
-        confidence: float
-        default_action: str
-
-        if rule_match is not None:
-            category, source, confidence = rule_match.category, "rules", rule_match.confidence
-            default_action = rule_match.default_action
-        elif use_llm_fallback:
-            llm_kwargs = {"model": llm_model} if llm_model else {}
-            llm_result = classify_message_safe(
-                from_address=raw.from_address,
+    for i, message_id in enumerate(new_ids):
+        try:
+            raw = gmail_client.fetch_message(service, message_id)
+            rule_match = engine.classify(
+                raw.from_address,
+                to_address=raw.to_address,
+                cc_address=raw.cc_address,
                 subject=raw.subject,
                 body=raw.body_plain or raw.snippet,
-                **llm_kwargs,
+                date_sent=raw.date_sent,
+                date_received=raw.date_received,
             )
-            summary.llm_calls += 1
-            if llm_result is not None:
-                summary.llm_cost_usd += llm_result.cost_usd
-            if llm_result is None or llm_result.confidence < min_confidence:
-                # Below the (deliberately higher than the primary pass's)
-                # confidence bar, or the LLM call itself failed — leave it in
-                # Spam untouched rather than risk a shaky rescue.
+
+            category: str
+            source: str
+            confidence: float
+            default_action: str
+
+            if rule_match is not None:
+                category, source, confidence = rule_match.category, "rules", rule_match.confidence
+                default_action = rule_match.default_action
+            elif use_llm_fallback:
+                llm_kwargs = {"model": llm_model} if llm_model else {}
+                llm_result = classify_message_safe(
+                    from_address=raw.from_address,
+                    subject=raw.subject,
+                    body=raw.body_plain or raw.snippet,
+                    **llm_kwargs,
+                )
+                summary.llm_calls += 1
+                if llm_result is not None:
+                    summary.llm_cost_usd += llm_result.cost_usd
+                if llm_result is None or llm_result.confidence < min_confidence:
+                    # Below the (deliberately higher than the primary pass's)
+                    # confidence bar, or the LLM call itself failed — leave it in
+                    # Spam untouched rather than risk a shaky rescue.
+                    _mark_seen(message_id)
+                    continue
+                category, source, confidence = llm_result.category, "llm", llm_result.confidence
+                default_action = engine.action_for_category(category).get("default_action", "flag")
+            else:
+                # No rule match and LLM fallback disabled — leave it in Spam.
+                # No spam_unknown re-labeling; see module docstring.
                 _mark_seen(message_id)
                 continue
-            category, source, confidence = llm_result.category, "llm", llm_result.confidence
-            default_action = engine.action_for_category(category).get("default_action", "flag")
-        else:
-            # No rule match and LLM fallback disabled — leave it in Spam.
-            # No spam_unknown re-labeling; see module docstring.
-            _mark_seen(message_id)
-            continue
 
-        if allowed_categories is not None and category not in allowed_categories:
-            # Confidently classified, but not a category worth pulling out
-            # of Spam for — leave it there (dry_run/no-op either way).
-            _mark_seen(message_id)
-            continue
+            if allowed_categories is not None and category not in allowed_categories:
+                # Confidently classified, but not a category worth pulling out
+                # of Spam for — leave it there (dry_run/no-op either way).
+                _mark_seen(message_id)
+                continue
 
-        outcome = execute_action(
-            service,
-            message_id=message_id,
-            category=category,
-            default_action=default_action,
-            account=account,
-            dry_run=dry_run,
-            label_cache=label_cache,
-            from_spam=True,
-        )
-        rescued = ClassifiedMessage(
-            message_id=message_id,
-            from_address=raw.from_address,
-            subject=raw.subject,
-            category=category,
-            source=source,
-            confidence=confidence,
-            outcome=outcome,
-        )
-        summary.rescued_from_spam.append(rescued)
-        _mark_seen(message_id)
+            outcome = execute_action(
+                service,
+                message_id=message_id,
+                category=category,
+                default_action=default_action,
+                account=account,
+                dry_run=dry_run,
+                label_cache=label_cache,
+                from_spam=True,
+            )
+            rescued = ClassifiedMessage(
+                message_id=message_id,
+                from_address=raw.from_address,
+                subject=raw.subject,
+                category=category,
+                source=source,
+                confidence=confidence,
+                outcome=outcome,
+            )
+            summary.rescued_from_spam.append(rescued)
+            _mark_seen(message_id)
+        except Exception as exc:
+            remaining = len(new_ids) - i
+            if _note_gmail_quota(exc, processed=i, remaining=remaining, summary=summary, where="spam sweep"):
+                break
+            raise

@@ -30,6 +30,16 @@ from classifier.rules_v2_engine import Iso8601Utc
 GMAIL_SCOPES = ("https://www.googleapis.com/auth/gmail.modify",)
 DEFAULT_QUERY = "in:inbox"
 CONFIG_ROOT = Path.home() / ".config" / "comms-classifier"
+# Gmail "Units per minute per user" is a rolling 60s window. A burst of
+# messages.get + messages.modify during classify used to 403 and HALT the
+# hourly schedule (2026-09-25). Callers must defer remaining mail to the
+# next cycle (exit 0) instead of retrying until HALT.
+RATE_LIMIT_MARKERS = (
+    "ratelimitexceeded",
+    "userratelimitexceeded",
+    "quota exceeded",
+    "rate limit",
+)
 
 # Registered accounts. `credentials_env` lets you point at a shared OAuth
 # client (e.g. reuse job-tracker's downloaded client_secret_*.json) via env
@@ -56,6 +66,38 @@ class RawMessage:
     body_plain: str
     body_html: str
     label_ids: list[str]
+
+
+def is_gmail_rate_limit(exc: BaseException) -> bool:
+    """True for Gmail 429 / 403 quota (`rateLimitExceeded`) errors."""
+    resp = getattr(exc, "resp", None)
+    status = getattr(resp, "status", None)
+    if status is None:
+        status = getattr(exc, "status_code", None)
+    try:
+        status_i = int(status) if status is not None else 0
+    except (TypeError, ValueError):
+        status_i = 0
+    blob = str(exc).lower()
+    if status_i == 429:
+        return True
+    if status_i in (403, 429) and any(marker in blob for marker in RATE_LIMIT_MARKERS):
+        return True
+    if status_i == 0 and any(marker in blob for marker in RATE_LIMIT_MARKERS):
+        return True
+    return False
+
+
+def execute_gmail(request: Any, *, _sleep=None) -> Any:
+    """`request.execute()` — Gmail rate limits are not retried here.
+
+    Sleeping through a per-minute quota would stall Spexture IMAP and the
+    rest of the hourly cycle. `classify_and_act` catches these errors, leaves
+    remaining messages in the inbox, and returns so the next hour retries.
+    `_sleep` is accepted for call-site compatibility with older tests.
+    """
+    del _sleep
+    return request.execute()
 
 
 def account_config_dir(account: str) -> Path:
@@ -259,7 +301,7 @@ def list_message_ids(
         request = (
             service.users().messages().list(userId="me", q=q, maxResults=max_results, pageToken=page_token)
         )
-        response = request.execute()
+        response = execute_gmail(request)
         for item in response.get("messages") or []:
             ids.append(item["id"])
             if limit is not None and len(ids) >= limit:
@@ -274,17 +316,17 @@ def list_message_ids(
 
 
 def fetch_message(service, message_id: str) -> RawMessage:
-    raw = service.users().messages().get(userId="me", id=message_id, format="full").execute()
+    raw = execute_gmail(service.users().messages().get(userId="me", id=message_id, format="full"))
     return parse_gmail_message(raw)
 
 
 def get_or_create_label(service, label_name: str) -> str:
     """Return the Gmail label id for `label_name`, creating it if needed."""
-    labels = service.users().labels().list(userId="me").execute().get("labels", [])
+    labels = execute_gmail(service.users().labels().list(userId="me")).get("labels", [])
     for label in labels:
         if label["name"] == label_name:
             return label["id"]
-    created = (
+    created = execute_gmail(
         service.users()
         .labels()
         .create(
@@ -295,30 +337,35 @@ def get_or_create_label(service, label_name: str) -> str:
                 "messageListVisibility": "show",
             },
         )
-        .execute()
     )
     return created["id"]
 
 
 def apply_label(service, message_id: str, label_id: str) -> None:
-    service.users().messages().modify(
-        userId="me", id=message_id, body={"addLabelIds": [label_id]}
-    ).execute()
+    execute_gmail(
+        service.users().messages().modify(
+            userId="me", id=message_id, body={"addLabelIds": [label_id]}
+        )
+    )
 
 
 def archive_message(service, message_id: str) -> None:
     """Remove INBOX so the message leaves the inbox but stays searchable."""
-    service.users().messages().modify(
-        userId="me", id=message_id, body={"removeLabelIds": ["INBOX"]}
-    ).execute()
+    execute_gmail(
+        service.users().messages().modify(
+            userId="me", id=message_id, body={"removeLabelIds": ["INBOX"]}
+        )
+    )
 
 
 def label_and_archive(service, message_id: str, label_id: str) -> None:
-    service.users().messages().modify(
-        userId="me",
-        id=message_id,
-        body={"addLabelIds": [label_id], "removeLabelIds": ["INBOX"]},
-    ).execute()
+    execute_gmail(
+        service.users().messages().modify(
+            userId="me",
+            id=message_id,
+            body={"addLabelIds": [label_id], "removeLabelIds": ["INBOX"]},
+        )
+    )
 
 
 def rescue_from_spam(service, message_id: str, label_id: str) -> None:
@@ -333,11 +380,13 @@ def rescue_from_spam(service, message_id: str, label_id: str) -> None:
     half-rescued state (SPAM removed, INBOX still set — landing back in the
     inbox — or vice versa) if the call were split in two.
     """
-    service.users().messages().modify(
-        userId="me",
-        id=message_id,
-        body={"addLabelIds": [label_id], "removeLabelIds": ["SPAM", "INBOX"]},
-    ).execute()
+    execute_gmail(
+        service.users().messages().modify(
+            userId="me",
+            id=message_id,
+            body={"addLabelIds": [label_id], "removeLabelIds": ["SPAM", "INBOX"]},
+        )
+    )
 
 
 def list_category_labels(service) -> list[dict[str, str]]:
@@ -345,7 +394,7 @@ def list_category_labels(service) -> list[dict[str, str]]:
     (classifier.actions.LABEL_PREFIX) — used by scripts/reset_categorization.py
     to find everything a prior classifier run may have applied.
     """
-    labels = service.users().labels().list(userId="me").execute().get("labels", [])
+    labels = execute_gmail(service.users().labels().list(userId="me")).get("labels", [])
     return [{"id": lbl["id"], "name": lbl["name"]} for lbl in labels if lbl["name"].startswith("Category/")]
 
 
@@ -356,11 +405,10 @@ def list_message_ids_with_label(service, label_id: str) -> list[str]:
     ids: list[str] = []
     page_token = None
     while True:
-        response = (
+        response = execute_gmail(
             service.users()
             .messages()
             .list(userId="me", labelIds=[label_id], maxResults=500, pageToken=page_token)
-            .execute()
         )
         for item in response.get("messages") or []:
             ids.append(item["id"])
@@ -388,4 +436,4 @@ def batch_modify(
         body["removeLabelIds"] = remove_label_ids
     for start in range(0, len(message_ids), 1000):
         chunk = message_ids[start : start + 1000]
-        service.users().messages().batchModify(userId="me", body={**body, "ids": chunk}).execute()
+        execute_gmail(service.users().messages().batchModify(userId="me", body={**body, "ids": chunk}))
