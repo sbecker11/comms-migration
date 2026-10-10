@@ -108,16 +108,21 @@ class RunSummary:
     # aren't diluted by a pass over a totally different mailbox folder.
     spam_scanned: int = 0
     rescued_from_spam: list[ClassifiedMessage] = field(default_factory=list)
-    # Messages left unprocessed because Gmail quota was hit this cycle.
+    # Messages left unprocessed because Gmail quota or a transient network
+    # error (timeout, connection reset, 5xx) was hit this cycle.
     # Next hourly cycle picks them up — do not HALT the schedule for this.
     deferred_for_quota: int = 0
 
 
 def _note_gmail_quota(exc: BaseException, *, processed: int, remaining: int, summary: RunSummary, where: str) -> bool:
-    if not gmail_client.is_gmail_rate_limit(exc):
+    if gmail_client.is_gmail_rate_limit(exc):
+        reason = "Gmail quota exhausted"
+    elif gmail_client.is_gmail_transient(exc):
+        reason = f"Gmail transient error ({type(exc).__name__}: {exc})"
+    else:
         return False
     print(
-        f"Gmail quota exhausted during {where} after {processed} message(s); "
+        f"{reason} during {where} after {processed} message(s); "
         f"deferring {remaining} to the next hour (exit 0, no HALT).",
         file=sys.stderr,
     )

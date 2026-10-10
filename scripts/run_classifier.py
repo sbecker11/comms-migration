@@ -42,7 +42,7 @@ def _print_report(summary) -> None:
     print(f"Processed {summary.total_messages} message(s).")
     if getattr(summary, "deferred_for_quota", 0):
         print(
-            f"Deferred {summary.deferred_for_quota} message(s) after Gmail quota — next hour will retry."
+            f"Deferred {summary.deferred_for_quota} message(s) after Gmail quota/transient error — next hour will retry."
         )
     if summary.by_category:
         print("\nBy category:")

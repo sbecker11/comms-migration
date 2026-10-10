@@ -562,6 +562,16 @@ rules:
       - field: from_url_pattern
         comparator: matches
         value: '@([\w-]+\.)*jobhat\.com$' # added 2026-07-06: "New job openings posted near you!"
+      # Added 2026-09-30: PCC / UKPharm (Stephen Gordon Joughin). A Metabody
+      # briefing with subject "Metabody" + PDF attachment was falling through
+      # to Category/spam_unknown because the body was only a one-word label
+      # and the PDF wasn't visible to the classifier.
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*pccjobs\.uk$'
+      - field: from_url_pattern
+        comparator: matches
+        value: '@([\w-]+\.)*pcc-ai-talentpartner\.com$'
       # Added 2026-07-06 (2nd pass): recurring job-board/staffing-agency
       # domains found repeatedly falling through to the (paid) LLM fallback
       # or getting mislabeled by the AI-subject fallback rule below when a

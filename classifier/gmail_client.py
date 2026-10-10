@@ -18,6 +18,7 @@ import base64
 import html
 import os
 import re
+import ssl
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parseaddr, parsedate_to_datetime
@@ -86,6 +87,23 @@ def is_gmail_rate_limit(exc: BaseException) -> bool:
     if status_i == 0 and any(marker in blob for marker in RATE_LIMIT_MARKERS):
         return True
     return False
+
+
+def is_gmail_transient(exc: BaseException) -> bool:
+    """True for network blips and Gmail 5xx — safe to retry next cycle.
+
+    A single SSL read timeout during `messages.modify` HALTed the hourly
+    schedule twice (2026-10-04, 2026-10-07); these must defer like quota.
+    """
+    if isinstance(exc, (TimeoutError, ConnectionError, ssl.SSLError)):
+        return True
+    if type(exc).__name__ in ("ServerNotFoundError", "RelatedTimeoutError"):
+        return True
+    status = getattr(getattr(exc, "resp", None), "status", None)
+    try:
+        return 500 <= int(status) < 600
+    except (TypeError, ValueError):
+        return False
 
 
 def execute_gmail(request: Any, *, _sleep=None) -> Any:

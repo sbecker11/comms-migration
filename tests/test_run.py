@@ -199,3 +199,39 @@ def test_classify_and_act_defers_remaining_on_gmail_quota(monkeypatch, tmp_path:
     )
     assert summary.deferred_for_quota == 2
     assert summary.messages == []
+
+
+def test_classify_and_act_defers_remaining_on_gmail_timeout(monkeypatch, tmp_path: Path):
+    service = SimpleNamespace()
+    engine = RulesEngine()
+    monkeypatch.setattr(engine, "classify", lambda *a, **k: None)
+    monkeypatch.setattr(engine, "all_rule_hits", lambda *a, **k: [])
+    monkeypatch.setattr(run_mod.gmail_client, "list_message_ids", lambda *a, **k: ["m1", "m2", "m3"])
+    monkeypatch.setattr(run_mod.gmail_client, "fetch_message", lambda *a, **k: _raw())
+    calls = []
+
+    def flaky(*a, **k):
+        calls.append(k["message_id"])
+        if len(calls) == 2:
+            raise TimeoutError("The read operation timed out")
+        return ActionOutcome(
+            message_id=k["message_id"],
+            category="spam_unknown",
+            label="Category/spam_unknown",
+            archived=False,
+            dry_run=True,
+        )
+
+    monkeypatch.setattr(run_mod, "execute_action", flaky)
+
+    summary = run_mod.classify_and_act(
+        account="recruiting_funnel",
+        dry_run=True,
+        use_llm_fallback=False,
+        rules_engine=engine,
+        service=service,
+        record_rule_telemetry=False,
+        rule_stats_path=tmp_path / "stats.json",
+    )
+    assert summary.deferred_for_quota == 2
+    assert len(summary.messages) == 1

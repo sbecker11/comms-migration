@@ -180,3 +180,15 @@ def test_apply_label_propagates_quota():
     with pytest.raises(_QuotaError):
         gmail_client.apply_label(svc, "m1", "L1")
     assert len(svc.modify_calls) == 1
+
+
+def test_is_gmail_transient_detects_timeouts_resets_and_5xx():
+    assert gmail_client.is_gmail_transient(TimeoutError("The read operation timed out"))
+    assert gmail_client.is_gmail_transient(ConnectionResetError())
+    server_err = RuntimeError("backend error")
+    server_err.resp = SimpleNamespace(status=503)
+    assert gmail_client.is_gmail_transient(server_err)
+    not_found = RuntimeError("not found")
+    not_found.resp = SimpleNamespace(status=404)
+    assert not gmail_client.is_gmail_transient(not_found)
+    assert not gmail_client.is_gmail_transient(ValueError("bad input"))
