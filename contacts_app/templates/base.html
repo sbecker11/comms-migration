@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Contacts{% endblock %}</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem("contacts-theme") || "dark"; }
+    catch (e) { document.documentElement.dataset.theme = "dark"; }
+  </script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,6 +15,7 @@
     <div class="container header-inner">
       <a href="/" class="brand">Contacts Editor</a>
       <span class="meta-hint">{{ meta.updated_at if meta is defined else "" }}</span>
+      <button type="button" id="theme-toggle" class="theme-toggle">Light theme</button>
     </div>
   </header>
   <main class="container">

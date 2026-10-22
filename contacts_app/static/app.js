@@ -256,7 +256,25 @@ document.addEventListener("click", (event) => {
   }
 });
 
+function initThemeToggle() {
+  const btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+  const show = () => {
+    const dark = document.documentElement.dataset.theme !== "light";
+    btn.textContent = dark ? "Light theme" : "Dark theme";
+    btn.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+  };
+  btn.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("contacts-theme", next); } catch (e) {}
+    show();
+  });
+  show();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
+  initThemeToggle();
   restoreListScroll();
   initListPage();
   initDetailPage();
