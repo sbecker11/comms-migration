@@ -235,3 +235,39 @@ def test_classify_and_act_defers_remaining_on_gmail_timeout(monkeypatch, tmp_pat
     )
     assert summary.deferred_for_quota == 2
     assert len(summary.messages) == 1
+
+
+def test_second_run_reuses_the_llm_verdict_without_a_call(monkeypatch, tmp_path: Path):
+    engine = RulesEngine()
+    monkeypatch.setattr(engine, "classify", lambda *a, **k: None)
+    monkeypatch.setattr(engine, "all_rule_hits", lambda *a, **k: [])
+    monkeypatch.setattr(engine, "action_for_category", lambda cat: {"default_action": "flag"})
+    monkeypatch.setattr(run_mod.gmail_client, "list_message_ids", lambda *a, **k: ["m1"])
+    monkeypatch.setattr(run_mod.gmail_client, "fetch_message", lambda *a, **k: _raw())
+    calls = []
+
+    def _llm(**k):
+        calls.append(k)
+        return ClassificationResult(category="social", subcategory=None, confidence=0.8, rationale="x", cost_usd=0.002)
+
+    monkeypatch.setattr(run_mod, "classify_message_safe", _llm)
+    acted = []
+    monkeypatch.setattr(
+        run_mod,
+        "execute_action",
+        lambda *a, **k: acted.append(k["category"])
+        or ActionOutcome(message_id="m1", category=k["category"], label="Category/social", archived=False, dry_run=False),
+    )
+    kwargs = dict(
+        account="personal_hub", dry_run=False, use_llm_fallback=True, rules_engine=engine,
+        service=SimpleNamespace(), record_rule_telemetry=False, llm_verdicts_path=tmp_path / "verdicts.json",
+    )
+
+    first = run_mod.classify_and_act(**kwargs)
+    second = run_mod.classify_and_act(**kwargs)
+
+    assert len(calls) == 1
+    assert (first.llm_calls, first.llm_cache_hits) == (1, 0)
+    assert (second.llm_calls, second.llm_cache_hits, second.llm_cost_usd) == (0, 1, 0.0)
+    assert second.messages[0].source == "llm" and second.messages[0].confidence == 0.8
+    assert acted == ["social", "social"]

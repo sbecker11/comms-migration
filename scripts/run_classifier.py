@@ -53,6 +53,8 @@ def _print_report(summary) -> None:
         print(f"\nResolved via: {source_str}")
     if summary.llm_calls:
         print(f"LLM fallback calls: {summary.llm_calls}  (est. cost: ${summary.llm_cost_usd:.4f})")
+    if summary.llm_cache_hits:
+        print(f"LLM verdicts reused from cache: {summary.llm_cache_hits}  (no API cost)")
 
     never_archived = [
         m for m in summary.messages if m.outcome is not None and not m.outcome.archived

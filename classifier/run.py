@@ -76,7 +76,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from classifier import gmail_client, rule_telemetry, spam_sweep_state
+from classifier import gmail_client, llm_verdict_cache, rule_telemetry, spam_sweep_state
 from classifier.actions import ActionOutcome, execute_action
 from classifier.llm_classify import ClassificationResult, classify_message_safe
 from classifier.rules_engine import RulesEngine
@@ -101,6 +101,7 @@ class RunSummary:
     by_source: dict[str, int] = field(default_factory=dict)
     llm_calls: int = 0
     llm_cost_usd: float = 0.0
+    llm_cache_hits: int = 0
     messages: list[ClassifiedMessage] = field(default_factory=list)
     dead_rule_warnings: list[str] = field(default_factory=list)
     # Spam-sweep rescues (see module docstring's "Spam-folder sweep" section)
@@ -148,6 +149,7 @@ def classify_and_act(
     spam_min_confidence: float = 0.75,
     spam_categories: set[str] | None = None,
     spam_seen_path: Path | None = None,
+    llm_verdicts_path: Path | None = None,
 ) -> RunSummary:
     engine = rules_engine or RulesEngine()
     service = service or gmail_client.get_gmail_service(account)
@@ -164,6 +166,8 @@ def classify_and_act(
 
     summary = RunSummary(account=account, total_messages=len(message_ids))
     label_cache: dict[str, str] = {}
+    verdicts = llm_verdict_cache.load(account, path=llm_verdicts_path) if use_llm_fallback else {}
+    verdicts_changed = False
     hits_per_message: list[list[str]] = []
 
     for i, message_id in enumerate(message_ids):
@@ -196,6 +200,13 @@ def classify_and_act(
                 source = "rules"
                 confidence = rule_match.confidence
                 default_action = rule_match.default_action
+            elif use_llm_fallback and message_id in verdicts:
+                cached = verdicts[message_id]
+                category = cached["category"]
+                source = "llm"
+                confidence = float(cached.get("confidence", 0.0))
+                default_action = engine.action_for_category(category).get("default_action", "flag")
+                summary.llm_cache_hits += 1
             elif use_llm_fallback:
                 llm_kwargs = {"model": llm_model} if llm_model else {}
                 llm_result = classify_message_safe(
@@ -211,6 +222,8 @@ def classify_and_act(
                     default_action = engine.action_for_category(category).get("default_action", "flag")
                     summary.llm_calls += 1
                     summary.llm_cost_usd += llm_result.cost_usd
+                    verdicts[message_id] = {"category": category, "confidence": confidence}
+                    verdicts_changed = True
                 else:
                     category, source, confidence = "spam_unknown", "fallback", 0.0
                     default_action = engine.action_for_category(category).get("default_action", "quarantine")
@@ -246,6 +259,9 @@ def classify_and_act(
                 outcome=outcome,
             )
         )
+
+    if verdicts_changed:
+        llm_verdict_cache.save(account, verdicts, path=llm_verdicts_path)
 
     if record_rule_telemetry and hits_per_message:
         summary.dead_rule_warnings = rule_telemetry.update_and_check(

@@ -10,6 +10,7 @@ htmlcov/
 rules/senders.yaml
 rules/.rule_match_stats.json
 rules/.spam_sweep_seen.*.json
+rules/.llm_verdicts.*.json
 
 # classifier/ local secrets/config — never commit real credentials or tokens.
 # .env itself is the exception (as of 2026-08-19): it's intentionally
