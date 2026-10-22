@@ -17,6 +17,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,30 @@ MAX_BODY_CHARS = 4_000
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ACTIONS_PATH = REPO_ROOT / "rules" / "actions.yaml"
+
+# One line per API call, shared with job-tracker's `llm_call_log` so its
+# spend report can total real monthly spend. `LLM_CALL_LOG` overrides the path.
+WORKSPACE_ROOT = Path(os.environ.get("RECRUITING_AUTOMATION_WORKSPACE_ROOT") or REPO_ROOT.parent)
+
+
+def _log_call(*, model: str, input_tokens: int, output_tokens: int, cost_usd: float) -> None:
+    path = Path(os.environ.get("LLM_CALL_LOG") or WORKSPACE_ROOT / "var" / "llm-calls.jsonl")
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": "comms-migration",
+        "step": "classify",
+        "model": model,
+        "input_tokens": int(input_tokens or 0),
+        "output_tokens": int(output_tokens or 0),
+        "cost_usd": round(float(cost_usd or 0.0), 6),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass
+
 
 # claude-haiku-4-5 pricing (USD per million tokens). Update if pricing changes.
 _MODEL_PRICING_USD_PER_MTOK = {
@@ -200,6 +225,11 @@ def classify_message(
         messages=[{"role": "user", "content": user_prompt}],
     )
     elapsed_s = time.monotonic() - start
+    usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
+    output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
+    cost = _cost_usd(model, input_tokens, output_tokens)
+    _log_call(model=model, input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost)
 
     raw_text = "".join(block.text for block in response.content if getattr(block, "type", "") == "text")
     try:
@@ -211,17 +241,12 @@ def classify_message(
     if category not in categories:
         raise LLMClassificationError(f"LLM returned unknown category: {category!r}")
 
-    usage = getattr(response, "usage", None)
-    input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
-    output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
-
     try:
         confidence = float(data.get("confidence", 0.5))
     except (TypeError, ValueError):
         confidence = 0.5
     confidence = max(0.0, min(confidence, 1.0))
 
-    cost = _cost_usd(model, input_tokens, output_tokens)
     print(
         f"    [llm classify] actual ~${cost:.4f} "
         f"({input_tokens} in / {output_tokens} out, {elapsed_s:.1f}s)",

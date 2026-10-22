@@ -205,3 +205,20 @@ def test_classify_message_bad_confidence_falls_back() -> None:
         client=client,
     )
     assert result.confidence == 0.5
+
+
+def test_every_api_call_is_logged_even_when_the_answer_is_rejected(tmp_path, monkeypatch) -> None:
+    log = tmp_path / "calls.jsonl"
+    monkeypatch.setenv("LLM_CALL_LOG", str(log))
+    classify_message(
+        from_address="digest@example.com", subject="s", body="b",
+        valid_categories=VALID_CATEGORIES, client=_FakeClient(_response("news")),
+    )
+    with pytest.raises(LLMClassificationError):
+        classify_message(
+            from_address="x@example.com", subject="s", body="b",
+            valid_categories=VALID_CATEGORIES, client=_FakeClient(_response("not_a_real_category")),
+        )
+    entries = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [(e["source"], e["step"], e["input_tokens"]) for e in entries] == [("comms-migration", "classify", 100)] * 2
+    assert all(e["cost_usd"] > 0 for e in entries)
