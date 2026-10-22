@@ -218,7 +218,7 @@ ciphertext until unlocked:
 ```
 
 Coverage is measured for the `classifier/` package (what `tests/` exercises).
-Policy and omit allowlist: [`COVERAGE.md`](COVERAGE.md).
+Policy and omit allowlist: [`COVERAGE.md`](../COVERAGE.md).
 For a workspace rollup with the sibling repos:
 
 ```bash

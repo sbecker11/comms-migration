@@ -7,7 +7,7 @@ Processing after mail arrives is **not** owned here → sibling
 [`recruiting-automation`](../recruiting-automation/).
 
 Umbrella install / ops: [`../README.md`](../README.md) (or [`docs/WORKSPACE.md`](docs/WORKSPACE.md))  
-Secrets / git-crypt: [`../SECRETS.md`](../SECRETS.md) (or [`docs/SECRETS.md`](docs/SECRETS.md))  
+Secrets / git-crypt: [`../SECRETS.md`](docs/SECRETS.md) (or [`docs/SECRETS.md`](docs/SECRETS.md))  
 Full historical detail: [`docs/REFERENCE.md`](docs/REFERENCE.md)  
 Runbook: [`comms-migration-runbook.md`](comms-migration-runbook.md) ·  
 Routing record: [`routing-inventory.md`](routing-inventory.md)
@@ -88,5 +88,5 @@ Deep OAuth / spam-sweep / Z3 notes: [`docs/REFERENCE.md`](docs/REFERENCE.md).
 
 ## `.env` / git-crypt
 
-Tracked + encrypted. Unlock steps: [`../SECRETS.md`](../SECRETS.md)  
+Tracked + encrypted. Unlock steps: [`../SECRETS.md`](docs/SECRETS.md)  
 (key file: `~/.git-crypt-keys/comms-migration.key`).
