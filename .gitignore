@@ -12,6 +12,9 @@ rules/.rule_match_stats.json
 rules/.spam_sweep_seen.*.json
 rules/.llm_verdicts.*.json
 
+# Open and fixed GitHub failure copies. Mail bodies stay on this machine.
+var/
+
 # classifier/ local secrets/config — never commit real credentials or tokens.
 # .env itself is the exception (as of 2026-08-19): it's intentionally
 # tracked, but transparently AES-256 encrypted at rest by git-crypt (see

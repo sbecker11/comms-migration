@@ -78,6 +78,8 @@ from pathlib import Path
 
 from classifier import gmail_client, llm_verdict_cache, rule_telemetry, spam_sweep_state
 from classifier.actions import ActionOutcome, execute_action
+from classifier.github_errors import DEFAULT_ROOT as GITHUB_ERRORS_ROOT
+from classifier.github_errors import record_github_error
 from classifier.llm_classify import ClassificationResult, classify_message_safe
 from classifier.rules_engine import RulesEngine
 
@@ -113,6 +115,7 @@ class RunSummary:
     # error (timeout, connection reset, 5xx) was hit this cycle.
     # Next hourly cycle picks them up — do not HALT the schedule for this.
     deferred_for_quota: int = 0
+    github_errors_stored: int = 0
 
 
 def _note_gmail_quota(exc: BaseException, *, processed: int, remaining: int, summary: RunSummary, where: str) -> bool:
@@ -150,6 +153,7 @@ def classify_and_act(
     spam_categories: set[str] | None = None,
     spam_seen_path: Path | None = None,
     llm_verdicts_path: Path | None = None,
+    github_errors_root: Path | None = None,
 ) -> RunSummary:
     engine = rules_engine or RulesEngine()
     service = service or gmail_client.get_gmail_service(account)
@@ -230,6 +234,18 @@ def classify_and_act(
             else:
                 category, source, confidence = "spam_unknown", "fallback", 0.0
                 default_action = engine.action_for_category(category).get("default_action", "quarantine")
+
+            if category == "github_error" and not dry_run:
+                record_github_error(
+                    message_id=message_id,
+                    from_address=raw.from_address,
+                    to_address=raw.to_address,
+                    subject=raw.subject,
+                    body=raw.body_plain or raw.snippet,
+                    received_at=raw.date_received or raw.date_sent,
+                    root=github_errors_root or GITHUB_ERRORS_ROOT,
+                )
+                summary.github_errors_stored += 1
 
             outcome = execute_action(
                 service,

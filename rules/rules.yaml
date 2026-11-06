@@ -78,6 +78,39 @@
 #   add_label: <category>   — must be a key in rules/actions.yaml's `categories:`
 
 rules:
+  # GitHub Actions failures forwarded from scbboston@gmail.com into the
+  # recruiting funnel. First match wins, so this stays above every sender
+  # rule: the forward's From is scbboston, which would otherwise land in
+  # active_client. The copy is stored by classifier/github_errors.py and
+  # kept until the failure is marked fixed. Both plus-addresses are the
+  # sink: +errormessages is the policy name, and +runfailures is the
+  # address the first forwards actually used.
+  - description: "GitHub Actions failure forwarded to +errormessages"
+    active: true
+    combinator: all
+    expressions:
+      - field: to
+        comparator: contains
+        value: "+errormessages"
+      - field: subject_pattern
+        comparator: matches
+        value: '(?i)(run failed|jobs were not successful|workflow failed)'
+    action:
+      add_label: github_error
+
+  - description: "GitHub Actions failure forwarded to +runfailures"
+    active: true
+    combinator: all
+    expressions:
+      - field: to
+        comparator: contains
+        value: "+runfailures"
+      - field: subject_pattern
+        comparator: matches
+        value: '(?i)(run failed|jobs were not successful|workflow failed)'
+    action:
+      add_label: github_error
+
   # --- Highest priority — never auto-archive, regardless of topic ---
   - description: "Security alerts (Google)"
     active: true

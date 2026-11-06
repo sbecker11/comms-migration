@@ -17,6 +17,20 @@
 
 categories:
   # --- Highest priority — never auto-archive, regardless of topic ---
+  # GitHub Actions failures forwarded from scbboston@gmail.com to
+  # shawnbecker.recruiting+errormessages@gmail.com. The message is copied
+  # into var/github-errors/open and stays there until the failure is marked
+  # fixed (scripts/github_errors.py). Archiving only removes it from the
+  # recruiting inbox; it does not close the error.
+  github_error:
+    trigger_signals:
+      - mail to shawnbecker.recruiting+errormessages@gmail.com or +runfailures
+      - a GitHub Actions failure ("Run failed") for any repository
+    default_action: label_archive
+    target_hub: n/a
+    human_in_loop: true
+    sensitivity: low
+
   security_alert:
     trigger_signals:
       - account sign-in / new-device notifications

@@ -139,6 +139,9 @@ Guidance per category, in priority order (check these before anything else):
 - "news": genuine news-outlet or subscribed news-digest content — NOT
   generic lifestyle-blog, self-help, or content-farm marketing newsletters
   that merely use a news-style format to sell something.
+- "github_error": a GitHub Actions or CI failure for a repository \
+(subject like "Run failed"), including one forwarded to the \
++errormessages address. Not GitHub marketing, and not a job pitch.
 - "active_client" / "recruiter_job": only if the email is clearly business \
 correspondence from a known-relationship sender or an actual recruiting/job \
 posting message. Most mail is NOT this.

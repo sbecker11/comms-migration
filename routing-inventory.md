@@ -51,6 +51,8 @@ Three source addresses forward into `shawnbecker.recruiting@gmail.com`:
 
 **Not a forward:** `sbecker11@icloud.com` / `@mac.com` / `@me.com` (one iCloud mailbox) is **not** redirected into the recruiting funnel. job-tracker polls it over IMAP (`--imap-prefix ICLOUD --personal-mailbox`) when `ICLOUD_IMAP_*` is set — see `job-tracker/docs/MAILBOX_COVERAGE.md`.
 
+**GitHub errors only (2026-10-26).** `scbboston@gmail.com` is still not processed and still does not forward the mailbox. GitHub error mail that arrives there for any repository is forwarded into the recruiting inbox at `shawnbecker.recruiting+errormessages@gmail.com`. Forwards already sent used `shawnbecker.recruiting+runfailures@gmail.com`; both addresses are the same sink. The classifier files each failure under `comms-migration/var/github-errors/open/` and archives it out of the recruiting inbox. The copy stays until the cause is found and fixed (`python3 scripts/github_errors.py fixed --repo owner/name --workflow name --note "..."`). Marking it fixed moves the copy to `var/github-errors/fixed/`; it is not deleted. A later failure is stored again.
+
 **Decision (2026-07-04): dropped Mac Mail as the daily client, kept
 `keep-a-copy` ON.** Gmail (the recruiting funnel) is now the sole place
 mail is read/triaged day to day — Mail.app and manually checking the

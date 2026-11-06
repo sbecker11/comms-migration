@@ -55,6 +55,11 @@ def _print_report(summary) -> None:
         print(f"LLM fallback calls: {summary.llm_calls}  (est. cost: ${summary.llm_cost_usd:.4f})")
     if summary.llm_cache_hits:
         print(f"LLM verdicts reused from cache: {summary.llm_cache_hits}  (no API cost)")
+    if getattr(summary, "github_errors_stored", 0):
+        print(
+            f"GitHub errors stored: {summary.github_errors_stored}  "
+            "(var/github-errors/open — kept until marked fixed)"
+        )
 
     never_archived = [
         m for m in summary.messages if m.outcome is not None and not m.outcome.archived
