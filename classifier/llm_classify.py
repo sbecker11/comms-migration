@@ -5,9 +5,8 @@ handles known contacts and known bulk-mail domains for free. This keeps
 per-message cost near zero for the bulk of recurring mail while still
 covering new/one-off senders.
 
-Uses Claude Haiku: this is a high-volume, low-complexity classification
-task (pick one of ~13 fixed categories), not a nuanced judgment call, so
-the cheapest capable model is the right default.
+Uses Grok 4.7 High Fast through Cursor Ultra: this is a high-volume,
+low-complexity classification task (pick one of ~13 fixed categories).
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = os.environ.get("COMMS_CLASSIFIER_LLM_MODEL", "claude-haiku-4-5")
+DEFAULT_MODEL = os.environ.get("COMMS_CLASSIFIER_LLM_MODEL", "grok-4.7")
 MAX_BODY_CHARS = 4_000
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -55,9 +54,9 @@ def _log_call(*, model: str, input_tokens: int, output_tokens: int, cost_usd: fl
         pass
 
 
-# claude-haiku-4-5 pricing (USD per million tokens). Update if pricing changes.
+# Grok 4.7 Fast, USD per million tokens. Estimates Cursor Models pool use.
 _MODEL_PRICING_USD_PER_MTOK = {
-    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
+    "grok-4.7": {"input": 4.00, "output": 12.00, "cache_read": 1.00},
 }
 
 
@@ -77,15 +76,25 @@ class LLMClassificationError(RuntimeError):
     """Raised when the LLM call fails or returns unusable output."""
 
 
-def _client():
-    import anthropic  # imported lazily so `anthropic` is only required when this path is used
+def _load_cursor_messages():
+    """Load the shared client without importing the job_tracker package."""
+    import importlib.util
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")  # pragma: allowlist secret
-    if not api_key:
-        raise LLMClassificationError(
-            "ANTHROPIC_API_KEY is not set. Add it to comms-migration/.env (see .env.example)."
-        )
-    return anthropic.Anthropic(api_key=api_key)  # pragma: allowlist secret
+    path = REPO_ROOT.parent / "job-tracker" / "src" / "job_tracker" / "pipeline" / "cursor_llm.py"
+    spec = importlib.util.spec_from_file_location("recruiting_cursor_llm", path)
+    if spec is None or spec.loader is None:
+        raise LLMClassificationError(f"Cursor Grok client not found at {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _client():
+    module = _load_cursor_messages()
+    try:
+        return module.CursorMessages()
+    except module.CursorLLMError as exc:
+        raise LLMClassificationError(str(exc)) from exc
 
 
 def _load_category_names(actions_path: Path = DEFAULT_ACTIONS_PATH) -> list[str]:
@@ -183,11 +192,17 @@ def _parse_response_text(raw: str) -> dict[str, Any]:
     return data
 
 
-def _cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
+def _cost_usd(model: str, input_tokens: int, output_tokens: int, cache_read_tokens: int = 0) -> float:
     pricing = _MODEL_PRICING_USD_PER_MTOK.get(model)
+    if pricing is None and str(model).startswith("grok-4.7"):
+        pricing = _MODEL_PRICING_USD_PER_MTOK["grok-4.7"]
     if not pricing:
         return 0.0
-    return (input_tokens / 1_000_000) * pricing["input"] + (output_tokens / 1_000_000) * pricing["output"]
+    return (
+        (input_tokens / 1_000_000) * pricing["input"]
+        + (output_tokens / 1_000_000) * pricing["output"]
+        + (cache_read_tokens / 1_000_000) * pricing.get("cache_read", 0.0)
+    )
 
 
 def classify_message(
@@ -231,7 +246,8 @@ def classify_message(
     usage = getattr(response, "usage", None)
     input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
     output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
-    cost = _cost_usd(model, input_tokens, output_tokens)
+    cached = getattr(usage, "cache_read_input_tokens", 0) if usage else 0
+    cost = _cost_usd(model, input_tokens, output_tokens, cached or 0)
     _log_call(model=model, input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost)
 
     raw_text = "".join(block.text for block in response.content if getattr(block, "type", "") == "text")

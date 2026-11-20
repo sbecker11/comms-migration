@@ -83,7 +83,7 @@ cp ~/Downloads/client_secret_*.json \
 python scripts/run_classifier.py --account recruiting_funnel --dry-run --limit 10
 ```
 
-Prefer shared `ANTHROPIC_API_KEY` in `../.env` (see umbrella README).  
+Prefer shared `CURSOR_API_KEY` in `../.env` (see umbrella README).  
 Deep OAuth / spam-sweep / Z3 notes: [`docs/REFERENCE.md`](docs/REFERENCE.md).
 
 ## `.env` / git-crypt

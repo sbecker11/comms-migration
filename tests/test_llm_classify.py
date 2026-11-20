@@ -167,8 +167,8 @@ def test_classify_message_raises_without_categories(monkeypatch) -> None:
 def test_client_requires_api_key(monkeypatch) -> None:
     import classifier.llm_classify as m
 
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    with pytest.raises(LLMClassificationError, match="ANTHROPIC_API_KEY"):
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    with pytest.raises(LLMClassificationError, match="CURSOR_API_KEY"):
         m._client()
 
 

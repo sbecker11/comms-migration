@@ -100,4 +100,4 @@ def _log_env_key_source(key: str) -> None:
     print(f"[comms-migration] {key}: loaded from {source} ({len(value)} chars).")
 
 
-_log_env_key_source("ANTHROPIC_API_KEY")
+_log_env_key_source("CURSOR_API_KEY")
